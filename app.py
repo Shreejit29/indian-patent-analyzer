@@ -110,11 +110,13 @@ uploaded_file = st.file_uploader(
     type=["pdf", "docx"],
 )
 
+
 if uploaded_file is not None:
 
     file_bytes = uploaded_file.getvalue()
 
     try:
+
         extracted_text = extract_text_from_file(
             file_bytes,
             uploaded_file.name,
@@ -123,11 +125,16 @@ if uploaded_file is not None:
         st.session_state.uploaded_text = extracted_text
         st.session_state.uploaded_filename = uploaded_file.name
 
+        # Clear previous results when a new document is uploaded.
+        st.session_state.analysis_result = None
+        st.session_state.rewrite_result = None
+
         st.success(
             f"Document loaded: {uploaded_file.name}"
         )
 
         with st.expander("Preview Extracted Text"):
+
             preview = extracted_text[:10000]
 
             st.text_area(
@@ -137,16 +144,18 @@ if uploaded_file is not None:
             )
 
     except Exception as exc:
+
         st.error(
             f"Unable to extract document text: {exc}"
         )
 
 
 # ============================================================
-# MAIN ACTIONS
+# MAIN ACTION BUTTONS
 # ============================================================
 
 col1, col2 = st.columns(2)
+
 
 with col1:
 
@@ -155,6 +164,7 @@ with col1:
         type="primary",
         use_container_width=True,
     )
+
 
 with col2:
 
@@ -170,12 +180,13 @@ with col2:
 
 
 # ============================================================
-# ANALYSIS
+# PATENT ANALYSIS
 # ============================================================
 
 if analyze_button:
 
     if not st.session_state.uploaded_text:
+
         st.warning(
             "Please upload a PDF or DOCX document first."
         )
@@ -190,6 +201,7 @@ if analyze_button:
 
                 result = analyze_document(
                     text=st.session_state.uploaded_text,
+                    filename=st.session_state.uploaded_filename,
                     document_type=document_type,
                     analysis_level=analysis_level,
                 )
@@ -199,30 +211,6 @@ if analyze_button:
                 st.success(
                     "Patent analysis completed successfully."
                 )
-
-            except TypeError:
-
-                # Compatibility fallback for analyzer versions
-                # using slightly different parameter names.
-
-                try:
-
-                    result = analyze_document(
-                        st.session_state.uploaded_text,
-                        document_type=document_type,
-                        analysis_level=analysis_level,
-                    )
-
-                    st.session_state.analysis_result = result
-
-                    st.success(
-                        "Patent analysis completed successfully."
-                    )
-
-                except Exception as exc:
-                    st.error(
-                        f"Analysis failed: {exc}"
-                    )
 
             except Exception as exc:
 
@@ -240,7 +228,7 @@ if rewrite_button:
     if document_type != "Form 2 Complete Specification":
 
         st.warning(
-            "Rewrite is currently available for "
+            "Rewrite is currently available only for "
             "Form 2 Complete Specification."
         )
 
@@ -252,20 +240,22 @@ if rewrite_button:
 
     else:
 
-        # --------------------------------------------------------
+        # ----------------------------------------------------
         # Use previous analysis as additional context
-        # --------------------------------------------------------
+        # ----------------------------------------------------
 
         analysis_context = ""
 
         if st.session_state.analysis_result:
 
             try:
+
                 analysis_context = str(
                     st.session_state.analysis_result
                 )
 
             except Exception:
+
                 analysis_context = ""
 
         with st.spinner(
@@ -297,10 +287,11 @@ if rewrite_button:
 
 
 # ============================================================
-# DISPLAY ANALYSIS
+# ANALYSIS DASHBOARD
 # ============================================================
 
 analysis = st.session_state.analysis_result
+
 
 if analysis:
 
@@ -318,6 +309,7 @@ if analysis:
             "Report",
         ]
     )
+
 
     # ========================================================
     # EXECUTIVE SUMMARY
@@ -395,6 +387,7 @@ if analysis:
         ):
 
             with column:
+
                 st.metric(
                     label,
                     value,
@@ -402,7 +395,7 @@ if analysis:
 
 
     # ========================================================
-    # FORM 2
+    # FORM 2 ANALYSIS
     # ========================================================
 
     with tabs[1]:
@@ -421,6 +414,7 @@ if analysis:
             col1, col2, col3 = st.columns(3)
 
             with col1:
+
                 st.metric(
                     "Word Count",
                     rule_engine.get(
@@ -430,25 +424,27 @@ if analysis:
                 )
 
             with col2:
+
+                claims = rule_engine.get(
+                    "claims",
+                    [],
+                )
+
                 st.metric(
                     "Claims",
-                    len(
-                        rule_engine.get(
-                            "claims",
-                            [],
-                        )
-                    ),
+                    len(claims),
                 )
 
             with col3:
+
+                issues = rule_engine.get(
+                    "issues",
+                    [],
+                )
+
                 st.metric(
                     "Issues",
-                    len(
-                        rule_engine.get(
-                            "issues",
-                            [],
-                        )
-                    ),
+                    len(issues),
                 )
 
             sections = rule_engine.get(
@@ -465,20 +461,21 @@ if analysis:
                 for section, detected in sections.items():
 
                     if detected:
+
                         st.success(
                             f"✓ {section}"
                         )
+
                     else:
+
                         st.warning(
                             f"⚠ {section} not detected"
                         )
 
-        gemini_sections = analysis.get(
-            "gemini_analysis",
-            {},
-        ).get(
-            "sections",
-            [],
+        gemini_sections = (
+            analysis
+            .get("gemini_analysis", {})
+            .get("sections", [])
         )
 
         if gemini_sections:
@@ -491,11 +488,13 @@ if analysis:
 
                 if isinstance(section, dict):
 
+                    section_name = section.get(
+                        "section",
+                        "Section",
+                    )
+
                     with st.expander(
-                        section.get(
-                            "section",
-                            "Section",
-                        )
+                        section_name
                     ):
 
                         st.write(
@@ -510,7 +509,7 @@ if analysis:
 
 
     # ========================================================
-    # CLAIMS
+    # CLAIM ANALYSIS
     # ========================================================
 
     with tabs[2]:
@@ -559,25 +558,31 @@ if analysis:
                             )
                         )
 
-                        if claim.get(
-                            "issues"
-                        ):
+                        claim_issues = claim.get(
+                            "issues",
+                            [],
+                        )
+
+                        if claim_issues:
 
                             st.markdown(
                                 "**Issues:**"
                             )
 
-                            for issue in claim[
-                                "issues"
-                            ]:
+                            for issue in claim_issues:
+
                                 st.warning(
                                     str(issue)
                                 )
 
                 else:
-                    st.write(str(claim))
+
+                    st.write(
+                        str(claim)
+                    )
 
         else:
+
             st.info(
                 "No claim analysis available."
             )
@@ -593,12 +598,10 @@ if analysis:
             "Abstract Analysis"
         )
 
-        abstract_analysis = analysis.get(
-            "gemini_analysis",
-            {},
-        ).get(
-            "abstract_analysis",
-            {},
+        abstract_analysis = (
+            analysis
+            .get("gemini_analysis", {})
+            .get("abstract_analysis", {})
         )
 
         if abstract_analysis:
@@ -609,15 +612,14 @@ if analysis:
 
         else:
 
-            rule_abstract = analysis.get(
-                "rule_engine",
-                {},
-            ).get(
-                "abstract",
-                "",
+            rule_abstract = (
+                analysis
+                .get("rule_engine", {})
+                .get("abstract", "")
             )
 
             if rule_abstract:
+
                 st.text_area(
                     "Extracted Abstract",
                     rule_abstract,
@@ -625,13 +627,14 @@ if analysis:
                 )
 
             else:
+
                 st.info(
                     "No abstract analysis available."
                 )
 
 
     # ========================================================
-    # ISSUES
+    # POTENTIAL ISSUES
     # ========================================================
 
     with tabs[4]:
@@ -640,25 +643,22 @@ if analysis:
             "Potential Issues"
         )
 
-        gemini_issues = analysis.get(
-            "gemini_analysis",
-            {},
-        ).get(
-            "issues",
-            [],
+        gemini_issues = (
+            analysis
+            .get("gemini_analysis", {})
+            .get("issues", [])
         )
 
-        rule_issues = analysis.get(
-            "rule_engine",
-            {},
-        ).get(
-            "issues",
-            [],
+        rule_issues = (
+            analysis
+            .get("rule_engine", {})
+            .get("issues", [])
         )
 
         all_issues = []
 
         if rule_issues:
+
             all_issues.extend(
                 [
                     {
@@ -670,6 +670,7 @@ if analysis:
             )
 
         if gemini_issues:
+
             all_issues.extend(
                 [
                     {
@@ -721,16 +722,18 @@ if analysis:
                             )
                         )
 
-                        if issue.get("recommendation"):
+                        recommendation = issue.get(
+                            "recommendation"
+                        )
+
+                        if recommendation:
 
                             st.markdown(
                                 "**Recommendation:**"
                             )
 
                             st.write(
-                                issue[
-                                    "recommendation"
-                                ]
+                                recommendation
                             )
 
                 else:
@@ -798,6 +801,7 @@ if analysis:
 
 rewrite = st.session_state.rewrite_result
 
+
 if rewrite:
 
     st.markdown("---")
@@ -815,45 +819,53 @@ if rewrite:
         """
     )
 
+
+    # ========================================================
+    # REWRITE SUMMARY
+    # ========================================================
+
     summary = get_rewrite_summary(
         rewrite
     )
 
-    # --------------------------------------------------------
-    # Summary metrics
-    # --------------------------------------------------------
-
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
+
         st.metric(
             "Rewrite Status",
             summary["rewrite_status"],
         )
 
     with col2:
+
         st.metric(
             "Changed Claims",
             summary["changed_claims"],
         )
 
     with col3:
+
         st.metric(
             "New-Matter Flags",
             summary["flag_count"],
         )
 
     with col4:
+
         st.metric(
             "Human Review",
-            "REQUIRED"
-            if summary["human_review_required"]
-            else "NOT FLAGGED",
+            (
+                "REQUIRED"
+                if summary["human_review_required"]
+                else "NOT FLAGGED"
+            ),
         )
 
-    # --------------------------------------------------------
-    # New matter result
-    # --------------------------------------------------------
+
+    # ========================================================
+    # SECTION 59 SCREENING
+    # ========================================================
 
     new_matter = rewrite.get(
         "new_matter_check",
@@ -888,6 +900,11 @@ if rewrite:
         "make a legal determination under Section 59."
     )
 
+
+    # ========================================================
+    # REVIEW FLAGS
+    # ========================================================
+
     flags = new_matter.get(
         "flags",
         [],
@@ -901,11 +918,13 @@ if rewrite:
 
         for flag in flags:
 
+            flag_type = flag.get(
+                "type",
+                "Review Flag",
+            )
+
             with st.expander(
-                flag.get(
-                    "type",
-                    "Review Flag",
-                )
+                flag_type
             ):
 
                 st.write(
@@ -928,9 +947,9 @@ if rewrite:
                     )
 
 
-    # --------------------------------------------------------
-    # Revision summary
-    # --------------------------------------------------------
+    # ========================================================
+    # REVISION SUMMARY
+    # ========================================================
 
     revision_summary = rewrite.get(
         "revision_summary",
@@ -944,14 +963,15 @@ if rewrite:
         )
 
         for item in revision_summary:
+
             st.write(
                 f"• {item}"
             )
 
 
-    # --------------------------------------------------------
-    # Original vs Revised
-    # --------------------------------------------------------
+    # ========================================================
+    # ORIGINAL VS REVISED
+    # ========================================================
 
     st.markdown(
         "### Original vs Revised"
@@ -978,6 +998,7 @@ if rewrite:
             original_text,
             height=700,
             label_visibility="collapsed",
+            key="original_form2_display",
         )
 
     with revised_col:
@@ -991,12 +1012,13 @@ if rewrite:
             revised_text,
             height=700,
             label_visibility="collapsed",
+            key="revised_form2_display",
         )
 
 
-    # --------------------------------------------------------
-    # Revised sections
-    # --------------------------------------------------------
+    # ========================================================
+    # REVISED FORM 2 SECTIONS
+    # ========================================================
 
     revised_form2 = rewrite.get(
         "revised_form2",
@@ -1064,13 +1086,13 @@ if rewrite:
                     label,
                     str(value),
                     height=200,
-                    key=f"rewrite_{key}",
+                    key=f"rewrite_section_{key}",
                 )
 
 
-    # --------------------------------------------------------
-    # Claims
-    # --------------------------------------------------------
+    # ========================================================
+    # REVISED CLAIMS
+    # ========================================================
 
     revised_claims = revised_form2.get(
         "claims",
@@ -1122,11 +1144,13 @@ if rewrite:
             ):
 
                 if claim_type:
+
                     st.caption(
                         f"Type: {claim_type}"
                     )
 
                 if claim_status:
+
                     st.caption(
                         f"Status: {claim_status}"
                     )
@@ -1139,9 +1163,9 @@ if rewrite:
                 )
 
 
-    # --------------------------------------------------------
-    # Change Log
-    # --------------------------------------------------------
+    # ========================================================
+    # CHANGE LOG
+    # ========================================================
 
     change_log = rewrite.get(
         "change_log",
@@ -1154,7 +1178,9 @@ if rewrite:
             "### Change Log"
         )
 
-        for change in change_log:
+        for index, change in enumerate(
+            change_log
+        ):
 
             if isinstance(change, dict):
 
@@ -1185,6 +1211,7 @@ if rewrite:
                     )
 
                     if reason:
+
                         st.caption(
                             f"Reason: {reason}"
                         )
@@ -1196,9 +1223,9 @@ if rewrite:
                 )
 
 
-    # --------------------------------------------------------
-    # Compliance Review
-    # --------------------------------------------------------
+    # ========================================================
+    # COMPLIANCE REVIEW
+    # ========================================================
 
     compliance = rewrite.get(
         "compliance_review",
@@ -1216,9 +1243,9 @@ if rewrite:
         )
 
 
-    # --------------------------------------------------------
-    # Download revised Form 2
-    # --------------------------------------------------------
+    # ========================================================
+    # EXPORT
+    # ========================================================
 
     st.markdown(
         "### Export Proposed Revision"
