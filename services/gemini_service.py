@@ -6,10 +6,20 @@ import streamlit as st
 from google import genai
 
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+# ---------------------------------------------------------
+# GEMINI CONFIGURATION
+# ---------------------------------------------------------
+
+DEFAULT_MODEL = "gemini-3.6-flash"
 
 
-def get_gemini_api_key(api_key: str | None = None) -> str:
+# ---------------------------------------------------------
+# API KEY
+# ---------------------------------------------------------
+
+def get_gemini_api_key(
+    api_key: str | None = None,
+) -> str:
     """
     Get Gemini API key.
 
@@ -22,69 +32,103 @@ def get_gemini_api_key(api_key: str | None = None) -> str:
     if api_key:
         return api_key
 
-    # Streamlit Secrets
+    # Streamlit Cloud Secrets
     try:
-        secret_key = st.secrets.get("GEMINI_API_KEY")
+        secret_key = st.secrets.get(
+            "GEMINI_API_KEY"
+        )
 
         if secret_key:
             return secret_key
+
     except Exception:
-        # st.secrets may not be configured during some
-        # local execution scenarios.
         pass
 
-    # Environment variable
-    environment_key = os.getenv("GEMINI_API_KEY")
+    # Local environment variable
+    environment_key = os.getenv(
+        "GEMINI_API_KEY"
+    )
 
     if environment_key:
         return environment_key
 
     raise ValueError(
         "Gemini API key not found. "
-        "Add GEMINI_API_KEY to Streamlit Secrets "
-        "or configure it as an environment variable."
+        "Add GEMINI_API_KEY to Streamlit Secrets."
     )
 
 
-def get_gemini_client(api_key: str | None = None):
-    """Create and return a Gemini API client."""
+# ---------------------------------------------------------
+# GEMINI CLIENT
+# ---------------------------------------------------------
+
+def get_gemini_client(
+    api_key: str | None = None,
+):
+    """Create Gemini client."""
 
     key = get_gemini_api_key(api_key)
 
-    return genai.Client(api_key=key)
+    return genai.Client(
+        api_key=key
+    )
 
+
+# ---------------------------------------------------------
+# GENERATE RESPONSE
+# ---------------------------------------------------------
 
 def generate_response(
     prompt: str,
     api_key: str | None = None,
     model: str = DEFAULT_MODEL,
 ) -> str:
-    """Send a prompt to Gemini and return its text response."""
+    """
+    Generate a response using the Gemini Interactions API.
+    """
 
-    client = get_gemini_client(api_key)
-
-    try:
-        response = client.models.generate_content(
-            model=model,
-            contents=prompt,
+    if not prompt.strip():
+        raise ValueError(
+            "Gemini prompt cannot be empty."
         )
 
-        if not response.text:
+    client = get_gemini_client(
+        api_key
+    )
+
+    try:
+
+        interaction = client.interactions.create(
+            model=model,
+            input=prompt,
+        )
+
+        response_text = interaction.output_text
+
+        if not response_text:
             raise ValueError(
                 "Gemini returned an empty response."
             )
 
-        return response.text.strip()
+        return response_text.strip()
 
     except Exception as exc:
+
         raise RuntimeError(
             f"Gemini API request failed: {exc}"
         ) from exc
 
 
-def clean_json_response(response_text: str) -> str:
+# ---------------------------------------------------------
+# CLEAN JSON
+# ---------------------------------------------------------
+
+def clean_json_response(
+    response_text: str,
+) -> str:
     """
-    Remove common Markdown code fences from Gemini JSON output.
+    Remove Markdown code fences if Gemini
+    returns JSON inside a code block.
     """
 
     text = response_text.strip()
@@ -101,31 +145,46 @@ def clean_json_response(response_text: str) -> str:
     return text.strip()
 
 
+# ---------------------------------------------------------
+# PARSE JSON
+# ---------------------------------------------------------
+
 def parse_json_response(
     response_text: str,
 ) -> dict[str, Any]:
     """
-    Parse Gemini response as JSON.
+    Parse Gemini response into a Python dictionary.
     """
 
-    cleaned = clean_json_response(response_text)
+    cleaned = clean_json_response(
+        response_text
+    )
 
     try:
-        result = json.loads(cleaned)
+
+        result = json.loads(
+            cleaned
+        )
 
     except json.JSONDecodeError as exc:
+
         raise ValueError(
             "Gemini returned invalid JSON. "
-            f"Response preview: {cleaned[:500]}"
+            f"Response preview: {cleaned[:1000]}"
         ) from exc
 
     if not isinstance(result, dict):
+
         raise ValueError(
             "Gemini JSON response must be an object."
         )
 
     return result
 
+
+# ---------------------------------------------------------
+# PATENT ANALYSIS
+# ---------------------------------------------------------
 
 def analyze_patent_text(
     patent_text: str,
@@ -134,67 +193,88 @@ def analyze_patent_text(
     analysis_level: str = "Detailed",
 ) -> dict[str, Any]:
     """
-    Analyze patent text using Gemini and return structured JSON.
+    Analyze an Indian patent document using Gemini 3.6 Flash.
     """
 
     if not patent_text.strip():
+
         raise ValueError(
             "Patent document contains no readable text."
         )
 
     prompt = f"""
-You are the AI analysis engine for an Indian Patent Draft Analyzer.
+You are the AI analysis engine for an
+Indian Patent Draft Analyzer.
 
 Your task is to analyze the supplied patent document using:
 
 1. The actual patent document.
-2. The verified Indian patent rule information supplied below.
+2. The verified Indian patent rule information.
 3. Careful patent drafting analysis.
 
 ANALYSIS LEVEL:
 {analysis_level}
 
-IMPORTANT LEGAL SAFETY RULES:
+==================================================
+IMPORTANT LEGAL SAFETY RULES
+==================================================
 
-- Do not invent Indian patent laws, sections, rules, forms,
-  or guidelines.
+- Do not invent Indian patent laws.
+- Do not invent sections.
+- Do not invent rules.
+- Do not invent forms.
 - Do not fabricate citations.
-- Do not say that a patent will definitely be granted or rejected.
-- Clearly distinguish formal/legal requirements from drafting suggestions.
+- Do not claim that a patent will definitely be granted.
+- Do not claim that a patent will definitely be rejected.
+- Clearly distinguish legal/formal requirements from
+  drafting suggestions.
 - Do not introduce new technical matter.
-- Do not rewrite the invention by adding unsupported technical features.
-- Identify evidence from the actual document whenever possible.
-- If evidence is insufficient, say so.
-- Treat this as preliminary AI-assisted analysis, not legal advice.
+- Do not add unsupported technical features.
+- Base findings on the actual patent document.
+- If evidence is insufficient, explicitly say so.
+- Treat this as preliminary AI-assisted analysis.
+- This is not legal advice.
 
-RULE CLASSIFICATION:
+==================================================
+ISSUE CLASSIFICATION
+==================================================
 
 LEGAL_FORMAL_REQUIREMENT:
-A requirement supported by the supplied official legal/rule source.
+A requirement directly supported by the supplied
+official Indian patent rule information.
 
 EXAMINATION_RISK:
-A potential issue that may attract examination attention.
+A potential issue that may attract examination
+attention.
 
 DRAFTING_SUGGESTION:
-An improvement that may improve clarity, consistency,
-completeness, or readability but is not necessarily a legal requirement.
+A drafting improvement that may improve clarity,
+consistency, completeness, or readability.
 
-SOURCE CONFIDENCE:
+==================================================
+CONFIDENCE
+==================================================
 
 HIGH:
 Directly supported by supplied official source.
 
 MEDIUM:
-Reasonable analytical inference from the document and supplied rules.
+Reasonable analytical inference from the document.
 
 LOW:
 Possible concern requiring human verification.
 
-Return ONLY valid JSON.
-Do not use Markdown.
-Do not put the JSON inside a code block.
+==================================================
+JSON OUTPUT
+==================================================
 
-Use this structure:
+Return ONLY valid JSON.
+
+Do not use Markdown.
+
+Do not put JSON inside a code block.
+
+Use exactly this structure:
 
 {{
   "document_assessment": {{
@@ -217,30 +297,37 @@ Use this structure:
       "status": "",
       "assessment": ""
     }},
+
     "field_of_invention": {{
       "status": "",
       "assessment": ""
     }},
+
     "background": {{
       "status": "",
       "assessment": ""
     }},
+
     "objects": {{
       "status": "",
       "assessment": ""
     }},
+
     "summary": {{
       "status": "",
       "assessment": ""
     }},
+
     "detailed_description": {{
       "status": "",
       "assessment": ""
     }},
+
     "claims": {{
       "status": "",
       "assessment": ""
     }},
+
     "abstract": {{
       "status": "",
       "assessment": ""
@@ -253,8 +340,8 @@ Use this structure:
       "title": "",
       "type": "LEGAL_FORMAL_REQUIREMENT",
       "category": "",
-      "severity": "critical|high|medium|low|info",
-      "confidence": "high|medium|low",
+      "severity": "critical",
+      "confidence": "high",
       "evidence": "",
       "explanation": "",
       "recommendation": "",
@@ -265,7 +352,7 @@ Use this structure:
   "claims": [
     {{
       "claim_number": 1,
-      "claim_type": "independent|dependent|unknown",
+      "claim_type": "independent",
       "category": "",
       "assessment": "",
       "issues": [],
@@ -289,7 +376,7 @@ Use this structure:
   "recommendations": [
     {{
       "title": "",
-      "priority": "critical|high|medium|low",
+      "priority": "high",
       "action": "",
       "reason": ""
     }}
@@ -306,23 +393,34 @@ Use this structure:
   "disclaimer": ""
 }}
 
-SCORING:
+==================================================
+SCORING
+==================================================
 
-All scores must be between 0 and 100.
+All scores must be integers from 0 to 100.
 
-These are internal AI-assisted indicators only.
+These are internal AI-assisted indicators.
+
 They are NOT official Indian Patent Office scores.
 
-SOURCE RULE:
+==================================================
+SOURCE RULE
+==================================================
 
-Only cite sources contained in the supplied rule information
-or sources explicitly provided in the prompt.
+Only cite sources contained in the supplied
+verified rule information.
 
-VERIFIED INDIAN PATENT RULE INFORMATION:
+Do not create URLs or legal references yourself.
+
+==================================================
+VERIFIED INDIAN PATENT RULE INFORMATION
+==================================================
 
 {rules_text}
 
-PATENT DOCUMENT:
+==================================================
+PATENT DOCUMENT
+==================================================
 
 {patent_text}
 """
@@ -330,6 +428,9 @@ PATENT DOCUMENT:
     raw_response = generate_response(
         prompt=prompt,
         api_key=api_key,
+        model=DEFAULT_MODEL,
     )
 
-    return parse_json_response(raw_response)
+    return parse_json_response(
+        raw_response
+    )
