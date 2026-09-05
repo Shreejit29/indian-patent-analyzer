@@ -1,31 +1,38 @@
 import json
 import os
 import re
+import time
 from typing import Any
 
 from google import genai
 
 
+# ============================================================
+# MODEL CONFIGURATION
+# ============================================================
+
 DEFAULT_MODEL = "gemini-3.6-flash"
 
+FALLBACK_MODELS = [
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+]
+
+
+# ============================================================
+# API KEY
+# ============================================================
 
 def get_api_key(
     api_key: str | None = None,
 ) -> str:
-    """
-    Get Gemini API key.
-
-    Priority:
-    1. Explicit api_key
-    2. Streamlit secrets
-    3. Environment variable
-    """
 
     if api_key:
+
         return api_key.strip()
 
     # --------------------------------------------------------
-    # Streamlit Secrets
+    # Streamlit secrets
     # --------------------------------------------------------
 
     try:
@@ -42,6 +49,7 @@ def get_api_key(
                 return key
 
     except Exception:
+
         pass
 
     # --------------------------------------------------------
@@ -58,22 +66,23 @@ def get_api_key(
 
     raise RuntimeError(
         "GEMINI_API_KEY was not found. "
-        "Add GEMINI_API_KEY to Streamlit secrets "
-        "or the environment."
+        "Add GEMINI_API_KEY to Streamlit secrets."
     )
 
+
+# ============================================================
+# JSON CLEANING
+# ============================================================
 
 def clean_json_response(
     text: str,
 ) -> str:
-    """Clean Markdown wrappers around JSON."""
 
     if not text:
         return ""
 
     text = text.strip()
 
-    # Remove ```json
     text = re.sub(
         r"^```json\s*",
         "",
@@ -81,7 +90,6 @@ def clean_json_response(
         flags=re.IGNORECASE,
     )
 
-    # Remove ```
     text = re.sub(
         r"^```\s*",
         "",
@@ -100,13 +108,12 @@ def clean_json_response(
 def parse_json_response(
     text: str,
 ) -> dict[str, Any]:
-    """Safely parse Gemini JSON."""
 
     cleaned = clean_json_response(
         text
     )
 
-    # Direct JSON
+    # Direct parsing
     try:
 
         result = json.loads(
@@ -117,12 +124,14 @@ def parse_json_response(
             result,
             dict,
         ):
+
             return result
 
     except json.JSONDecodeError:
+
         pass
 
-    # Try extracting JSON object
+    # Extract JSON object
     start = cleaned.find("{")
     end = cleaned.rfind("}")
 
@@ -142,9 +151,11 @@ def parse_json_response(
                 result,
                 dict,
             ):
+
                 return result
 
         except json.JSONDecodeError:
+
             pass
 
     raise ValueError(
@@ -152,15 +163,16 @@ def parse_json_response(
     )
 
 
+# ============================================================
+# PATENT ANALYSIS PROMPT
+# ============================================================
+
 def build_analysis_prompt(
     patent_text: str,
     context: str,
     document_type: str,
     analysis_level: str,
 ) -> str:
-    """
-    Build the main patent-analysis prompt.
-    """
 
     return f"""
 You are an Indian Patent Draft Analyzer AI.
@@ -169,7 +181,7 @@ Analyze the supplied patent document using the supplied
 Indian patent law, rules, deterministic checks and Patent
 Office Manual evidence.
 
-Your role is drafting and examination-risk assistance.
+You are a drafting and examination-risk assistance system.
 
 You are NOT the Indian Patent Office and must not provide
 a definitive legal determination.
@@ -190,17 +202,17 @@ IMPORTANT SAFEGUARDS
 
 1. Do not fabricate facts.
 2. Do not fabricate prior-art documents.
-3. Do not fabricate case law.
-4. Do not fabricate patent numbers.
+3. Do not fabricate patent numbers.
+4. Do not fabricate case law.
 5. Do not invent technical features.
 6. Do not assume missing disclosure.
-7. Clearly distinguish:
-   - formal requirement
-   - examination risk
-   - drafting suggestion
-8. Section 3 screening is not a final patentability determination.
+7. Distinguish clearly between:
+   - Legal/formal requirement
+   - Examination risk
+   - Drafting suggestion
+8. Section 3 screening is not a final patentability decision.
 9. Section 59 issues must be treated cautiously.
-10. Never state that a patent will definitely be granted or refused.
+10. Never guarantee grant or refusal.
 11. Use the original document as the primary technical source.
 
 ==================================================
@@ -213,13 +225,12 @@ Use sources in this order:
 2. Deterministic rule-engine analysis
 3. Indian Patents Act / Rules supplied in context
 4. Patent Office Manual evidence supplied in context
-5. General patent drafting knowledge
+5. General drafting knowledge
 
-If sources conflict, identify the conflict instead of
-silently resolving it.
+If sources conflict, identify the conflict.
 
 ==================================================
-ANALYSIS REQUIREMENTS
+ANALYZE
 ==================================================
 
 Analyze:
@@ -328,58 +339,161 @@ PATENT DOCUMENT
 """
 
 
+# ============================================================
+# DETECT TEMPORARY CAPACITY ERRORS
+# ============================================================
+
+def is_temporary_capacity_error(
+    error: Exception,
+) -> bool:
+
+    message = str(
+        error
+    ).lower()
+
+    capacity_terms = [
+        "503",
+        "unavailable",
+        "high demand",
+        "temporarily",
+        "no capacity",
+        "service unavailable",
+    ]
+
+    return any(
+        term in message
+        for term in capacity_terms
+    )
+
+
+# ============================================================
+# GEMINI REQUEST
+# ============================================================
+
 def generate_response(
     prompt: str,
     api_key: str | None = None,
     model: str = DEFAULT_MODEL,
 ) -> str:
-    """
-    Generate a Gemini response using the standard
-    Gemini generate_content API.
-
-    This intentionally avoids the Interactions API.
-    """
 
     key = get_api_key(
         api_key
     )
 
-    try:
+    client = genai.Client(
+        api_key=key
+    )
 
-        client = genai.Client(
-            api_key=key
-        )
+    models_to_try = [
+        model
+    ]
 
-        response = (
-            client.models.generate_content(
-                model=model,
-                contents=prompt,
-            )
-        )
+    for fallback in FALLBACK_MODELS:
 
-        text = getattr(
-            response,
-            "text",
-            None,
-        )
+        if fallback not in models_to_try:
 
-        if not text:
-
-            raise RuntimeError(
-                "Gemini returned an empty response."
+            models_to_try.append(
+                fallback
             )
 
-        return text.strip()
+    errors = []
 
-    except Exception as exc:
+    for current_model in models_to_try:
 
-        error_message = str(exc)
+        # ----------------------------------------------------
+        # Retry each model up to 3 times
+        # ----------------------------------------------------
 
-        raise RuntimeError(
-            "Gemini API request failed: "
-            + error_message
-        ) from exc
+        max_retries = 3
 
+        for attempt in range(
+            max_retries
+        ):
+
+            try:
+
+                response = (
+                    client.models.generate_content(
+                        model=current_model,
+                        contents=prompt,
+                    )
+                )
+
+                text = getattr(
+                    response,
+                    "text",
+                    None,
+                )
+
+                if not text:
+
+                    raise RuntimeError(
+                        "Gemini returned an empty response."
+                    )
+
+                return text.strip()
+
+            except Exception as exc:
+
+                errors.append(
+                    {
+                        "model": current_model,
+                        "attempt": attempt + 1,
+                        "error": str(exc),
+                    }
+                )
+
+                # ------------------------------------------------
+                # Only retry temporary capacity errors
+                # ------------------------------------------------
+
+                if not is_temporary_capacity_error(
+                    exc
+                ):
+
+                    raise RuntimeError(
+                        "Gemini API request failed: "
+                        + str(exc)
+                    ) from exc
+
+                # ------------------------------------------------
+                # Exponential backoff
+                # ------------------------------------------------
+
+                if attempt < max_retries - 1:
+
+                    delay = 2 ** attempt
+
+                    time.sleep(
+                        delay
+                    )
+
+        # ----------------------------------------------------
+        # Move to fallback model
+        # ----------------------------------------------------
+
+    error_summary = "\n".join(
+        [
+            (
+                f"Model={item['model']}, "
+                f"Attempt={item['attempt']}: "
+                f"{item['error']}"
+            )
+            for item in errors
+        ]
+    )
+
+    raise RuntimeError(
+        "Gemini models are temporarily unavailable "
+        "or experiencing high demand.\n\n"
+        "Models attempted:\n"
+        + error_summary
+    )
+
+
+# ============================================================
+# PATENT ANALYSIS
+# ============================================================
 
 def analyze_patent_text(
     patent_text: str,
@@ -388,9 +502,6 @@ def analyze_patent_text(
     api_key: str | None = None,
     analysis_level: str = "Detailed",
 ) -> dict[str, Any]:
-    """
-    Analyze patent text and return structured JSON.
-    """
 
     if not patent_text or not patent_text.strip():
 
@@ -425,7 +536,10 @@ def analyze_patent_text(
             + str(exc)
         ) from exc
 
-    # Ensure important fields exist.
+    # --------------------------------------------------------
+    # Ensure expected fields
+    # --------------------------------------------------------
+
     result.setdefault(
         "document_assessment",
         {},
