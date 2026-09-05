@@ -24,7 +24,7 @@ def get_gemini_api_key(
     Get Gemini API key.
 
     Priority:
-    1. Explicitly supplied API key
+    1. Explicit API key
     2. Streamlit Secrets
     3. Environment variable
     """
@@ -32,20 +32,35 @@ def get_gemini_api_key(
     if api_key:
         return api_key.strip()
 
+    # -----------------------------------------------------
     # Streamlit Cloud Secrets
+    # -----------------------------------------------------
+
     try:
-        secret_key = st.secrets.get("GEMINI_API_KEY")
+
+        secret_key = st.secrets.get(
+            "GEMINI_API_KEY"
+        )
 
         if secret_key:
-            return str(secret_key).strip()
+
+            return str(
+                secret_key
+            ).strip()
 
     except Exception:
         pass
 
-    # Local environment variable
-    environment_key = os.getenv("GEMINI_API_KEY")
+    # -----------------------------------------------------
+    # Environment variable
+    # -----------------------------------------------------
+
+    environment_key = os.getenv(
+        "GEMINI_API_KEY"
+    )
 
     if environment_key:
+
         return environment_key.strip()
 
     raise ValueError(
@@ -61,9 +76,13 @@ def get_gemini_api_key(
 def get_gemini_client(
     api_key: str | None = None,
 ):
-    """Create Gemini client."""
+    """
+    Create Gemini client.
+    """
 
-    key = get_gemini_api_key(api_key)
+    key = get_gemini_api_key(
+        api_key
+    )
 
     return genai.Client(
         api_key=key
@@ -84,22 +103,30 @@ def generate_response(
     """
 
     if not prompt or not prompt.strip():
+
         raise ValueError(
             "Gemini prompt cannot be empty."
         )
 
-    client = get_gemini_client(api_key)
+    client = get_gemini_client(
+        api_key
+    )
 
     try:
 
-        interaction = client.interactions.create(
-            model=model,
-            input=prompt,
+        interaction = (
+            client.interactions.create(
+                model=model,
+                input=prompt,
+            )
         )
 
-        response_text = interaction.output_text
+        response_text = (
+            interaction.output_text
+        )
 
         if not response_text:
+
             raise ValueError(
                 "Gemini returned an empty response."
             )
@@ -114,7 +141,7 @@ def generate_response(
 
 
 # =========================================================
-# CLEAN JSON RESPONSE
+# CLEAN JSON
 # =========================================================
 
 def clean_json_response(
@@ -127,20 +154,29 @@ def clean_json_response(
 
     text = response_text.strip()
 
-    if text.startswith("```json"):
+    if text.startswith(
+        "```json"
+    ):
+
         text = text[7:]
 
-    elif text.startswith("```"):
+    elif text.startswith(
+        "```"
+    ):
+
         text = text[3:]
 
-    if text.endswith("```"):
+    if text.endswith(
+        "```"
+    ):
+
         text = text[:-3]
 
     return text.strip()
 
 
 # =========================================================
-# PARSE JSON RESPONSE
+# PARSE JSON
 # =========================================================
 
 def parse_json_response(
@@ -150,11 +186,15 @@ def parse_json_response(
     Parse Gemini response into a Python dictionary.
     """
 
-    cleaned = clean_json_response(response_text)
+    cleaned = clean_json_response(
+        response_text
+    )
 
     try:
 
-        result = json.loads(cleaned)
+        result = json.loads(
+            cleaned
+        )
 
     except json.JSONDecodeError as exc:
 
@@ -163,7 +203,10 @@ def parse_json_response(
             f"Response preview: {cleaned[:1000]}"
         ) from exc
 
-    if not isinstance(result, dict):
+    if not isinstance(
+        result,
+        dict,
+    ):
 
         raise ValueError(
             "Gemini JSON response must be an object."
@@ -178,8 +221,8 @@ def parse_json_response(
 
 def analyze_patent_text(
     patent_text: str,
-    rules_text: str = "",
     context: str = "",
+    document_type: str = "Other",
     api_key: str | None = None,
     analysis_level: str = "Detailed",
 ) -> dict[str, Any]:
@@ -191,13 +234,19 @@ def analyze_patent_text(
     patent_text:
         Extracted patent document text.
 
-    rules_text:
-        Verified Indian Patent Act / Rules information.
-
     context:
-        Additional retrieved evidence, including
-        Patent Office Manual material and other
-        deterministic analysis context.
+        Complete analysis context prepared by analyzer.py.
+        This includes:
+
+        - Form 2 rules
+        - Patent Act / Rules database
+        - deterministic rule analysis
+        - claim analysis
+        - Patent Office Manual evidence
+        - source hierarchy
+
+    document_type:
+        Type selected by the user in the Streamlit interface.
 
     api_key:
         Gemini API key.
@@ -212,33 +261,29 @@ def analyze_patent_text(
             "Patent document contains no readable text."
         )
 
-    # -----------------------------------------------------
-    # Optional context
-    # -----------------------------------------------------
-
     if not context:
+
         context = (
-            "No additional Patent Office Manual evidence "
-            "was retrieved for this document."
+            "No additional analysis context was supplied."
         )
 
-    if not rules_text:
-        rules_text = (
-            "No verified patent rule information was supplied."
-        )
-
-    # -----------------------------------------------------
-    # Gemini prompt
-    # -----------------------------------------------------
+    # =====================================================
+    # GEMINI PROMPT
+    # =====================================================
 
     prompt = f"""
 You are the AI analysis engine for an
 Indian Patent Draft Analyzer.
 
-Your task is to analyze the supplied Indian patent document.
+You analyze Indian patent documents using the supplied
+patent document and the verified knowledge/context
+prepared by the application.
 
-You MUST use the supplied sources as the primary basis
-for your analysis.
+==================================================
+DOCUMENT TYPE
+==================================================
+
+{document_type}
 
 ==================================================
 ANALYSIS LEVEL
@@ -250,21 +295,30 @@ ANALYSIS LEVEL
 SOURCE HIERARCHY
 ==================================================
 
-Use the sources in this order of authority:
+The supplied context contains information from multiple
+sources.
 
-1. Indian Patents Act and verified statutory provisions
-2. Indian Patents Rules and verified rules
-3. Official Indian Patent Office guidelines
-4. Patent Office Manual / procedural guidance
-5. Deterministic analysis generated by the application
-6. Your own patent-drafting reasoning
+Use the following hierarchy:
 
-IMPORTANT:
+1. Patents Act, 1970
+2. Applicable Patents Rules
+3. Official amendments / Gazette notifications
+4. Official Patent Office guidelines
+5. Patent Office Manual
+6. Deterministic application analysis
+7. Drafting suggestions
 
-The Patent Office Manual is practical/procedural guidance.
-It must NOT override the Patents Act or Patents Rules.
+If two sources appear to conflict:
 
-Do not treat a drafting suggestion as a statutory requirement.
+- do not silently resolve the conflict;
+- identify the conflict;
+- prefer the applicable statutory/official source;
+- state that human verification of the current official
+  source is required.
+
+The Patent Office Manual is procedural/practical guidance.
+It does NOT have the force of legislation and must not
+override the Patents Act or Patents Rules.
 
 ==================================================
 IMPORTANT LEGAL SAFETY RULES
@@ -274,17 +328,19 @@ IMPORTANT LEGAL SAFETY RULES
 - Do not invent sections.
 - Do not invent rules.
 - Do not invent forms.
+- Do not fabricate case law.
 - Do not fabricate citations.
-- Do not fabricate source references.
+- Do not fabricate URLs.
+- Do not fabricate Patent Office Manual page numbers.
 - Do not claim that a patent will definitely be granted.
 - Do not claim that a patent will definitely be rejected.
-- Clearly distinguish legal/formal requirements from
-  examination risks and drafting suggestions.
 - Do not introduce new technical matter.
 - Do not add unsupported technical features.
+- Do not silently modify the applicant's invention.
 - Base findings on the actual patent document.
 - If evidence is insufficient, explicitly say so.
-- Do not assume facts that are not present in the document.
+- Distinguish statutory requirements from examination risks.
+- Distinguish examination risks from drafting suggestions.
 - Treat this as preliminary AI-assisted analysis.
 - This is not legal advice.
 
@@ -292,58 +348,54 @@ IMPORTANT LEGAL SAFETY RULES
 ISSUE CLASSIFICATION
 ==================================================
 
-LEGAL_FORMAL_REQUIREMENT:
+LEGAL_FORMAL_REQUIREMENT
 
-Use this only where the issue is directly supported by
-the supplied verified Indian patent law/rule information.
+Use this only when the issue is directly supported by
+the supplied authoritative Indian patent law/rule information.
 
-EXAMINATION_RISK:
+EXAMINATION_RISK
 
-Use this where the issue is a potential concern that
-may attract examination attention, but is not necessarily
-a confirmed statutory violation.
+Use this when the issue may attract examination attention
+or require clarification, but is not necessarily a confirmed
+statutory violation.
 
-DRAFTING_SUGGESTION:
+DRAFTING_SUGGESTION
 
-Use this for improvements to clarity, consistency,
-structure, completeness, readability, or drafting quality.
+Use this for improvements in:
+
+- clarity
+- consistency
+- precision
+- completeness
+- readability
+- claim drafting
+- specification organization
 
 ==================================================
 CONFIDENCE
 ==================================================
 
-HIGH:
+HIGH
 
-Directly supported by the supplied official source
-and clearly applicable to the document.
+Directly supported by the supplied official source and
+clearly applicable to the document.
 
-MEDIUM:
+MEDIUM
 
-Reasonable analytical inference from the document
+Reasonable analytical inference from the patent document
 and supplied sources.
 
-LOW:
+LOW
 
 Possible concern requiring human verification.
 
 ==================================================
-EVIDENCE REQUIREMENT
+DOCUMENT ANALYSIS
 ==================================================
 
-For every significant issue:
+Analyze the document as applicable to its selected type.
 
-- identify the relevant document evidence;
-- explain why it matters;
-- identify the supplied source where applicable;
-- do not fabricate page numbers or citations;
-- if the source does not directly support the finding,
-  classify it as examination risk or drafting suggestion.
-
-==================================================
-PATENT DOCUMENT ANALYSIS
-==================================================
-
-Analyze, where applicable:
+Consider:
 
 1. Document type
 2. Title
@@ -358,15 +410,16 @@ Analyze, where applicable:
 11. Internal consistency
 12. Claim support
 13. Claim clarity
-14. Claim dependency
-15. Antecedent basis
-16. Claim scope
-17. Unity / single invention considerations
+14. Claim succinctness
+15. Claim dependency
+16. Antecedent basis
+17. Claim scope
 18. Sufficiency of disclosure
 19. Best method considerations
-20. Abstract compliance
-21. Potential Section 3 exclusions
-22. Other examination risks supported by supplied sources
+20. Unity / single invention considerations
+21. Abstract requirements
+22. Potential Section 3 exclusions
+23. Other examination risks supported by the supplied sources
 
 Do not determine patentability conclusively.
 
@@ -374,8 +427,9 @@ Do not determine patentability conclusively.
 CLAIM ANALYSIS
 ==================================================
 
-For each claim, consider:
+For each claim, where claims are available, consider:
 
+- claim number
 - independent/dependent status
 - claim category
 - technical elements
@@ -385,48 +439,49 @@ For each claim, consider:
 - succinctness
 - support by description
 - consistency with disclosed embodiments
-- unnecessary limitations
-- potentially unclear terminology
+- potentially unnecessary limitations
+- unclear terminology
 - possible examination risks
 
-Do not rewrite claims by introducing technical matter
-that is not disclosed in the patent document.
+Do not introduce technical matter that is not disclosed
+in the patent document.
 
 ==================================================
 ABSTRACT ANALYSIS
 ==================================================
 
-Check:
+Where an abstract exists, assess:
 
 - presence
-- relationship with title
+- title relationship
 - approximate word count
 - technical disclosure
-- consistency with invention
-- unnecessary claims of advantage
+- consistency with the invention
+- unnecessary matter
 - reference numerals where applicable
-- consistency with the supplied rules
+- compliance with supplied rules
 
 ==================================================
 SOURCE RULE
 ==================================================
 
-Only cite sources that appear in the supplied
-verified rule information or supplied manual context.
+Use only sources supplied in the context.
 
-Do not create URLs.
+Do not invent a source.
 
-Do not create legal references that are not supplied.
+Do not invent a citation.
 
-==================================================
-VERIFIED INDIAN PATENT RULE INFORMATION
-==================================================
+Do not invent a legal provision.
 
-{rules_text}
+If the supplied context does not establish a point,
+state that human verification is required.
 
 ==================================================
-PATENT OFFICE MANUAL / ADDITIONAL EVIDENCE
+APPLICATION-GENERATED CONTEXT
 ==================================================
+
+The following context was prepared by the patent
+analysis application.
 
 {context}
 
@@ -434,10 +489,13 @@ PATENT OFFICE MANUAL / ADDITIONAL EVIDENCE
 PATENT DOCUMENT
 ==================================================
 
+The following is the extracted text of the actual
+patent document being analyzed.
+
 {patent_text}
 
 ==================================================
-JSON OUTPUT
+OUTPUT REQUIREMENT
 ==================================================
 
 Return ONLY valid JSON.
@@ -445,6 +503,8 @@ Return ONLY valid JSON.
 Do not use Markdown.
 
 Do not put JSON inside a code block.
+
+Do not add explanatory text before or after the JSON.
 
 Use exactly this structure:
 
@@ -465,7 +525,6 @@ Use exactly this structure:
   }},
 
   "sections": {{
-
     "title": {{
       "status": "",
       "assessment": ""
@@ -505,7 +564,6 @@ Use exactly this structure:
       "status": "",
       "assessment": ""
     }}
-
   }},
 
   "issues": [
@@ -577,32 +635,39 @@ These are internal AI-assisted indicators.
 
 They are NOT official Indian Patent Office scores.
 
-Do not interpret the overall score as a probability
-of patent grant or rejection.
+The scores must NOT be interpreted as:
+
+- probability of patent grant;
+- probability of patent rejection;
+- legal validity;
+- enforceability.
 
 ==================================================
-FINAL VALIDATION
+VALIDATION BEFORE RESPONSE
 ==================================================
 
-Before returning the JSON:
+Before returning the response:
 
-1. Ensure it is valid JSON.
+1. Ensure the response is valid JSON.
 2. Ensure all required top-level fields are present.
 3. Ensure scores are integers from 0 to 100.
-4. Ensure issue types are one of:
-   - LEGAL_FORMAL_REQUIREMENT
-   - EXAMINATION_RISK
-   - DRAFTING_SUGGESTION
+4. Ensure issue types use only:
+   LEGAL_FORMAL_REQUIREMENT
+   EXAMINATION_RISK
+   DRAFTING_SUGGESTION
 5. Do not fabricate legal citations.
 6. Do not fabricate evidence.
-7. Do not introduce new technical matter.
-8. Ensure findings are grounded in the supplied document.
-9. Distinguish statutory requirements from suggestions.
+7. Do not fabricate sources.
+8. Do not introduce new technical matter.
+9. Ensure findings are grounded in the supplied patent document.
+10. Distinguish statutory requirements from suggestions.
+11. Distinguish examination risks from drafting suggestions.
+12. Do not claim guaranteed grant or rejection.
 """
 
-    # -----------------------------------------------------
-    # Gemini request
-    # -----------------------------------------------------
+    # =====================================================
+    # GEMINI REQUEST
+    # =====================================================
 
     raw_response = generate_response(
         prompt=prompt,
@@ -610,9 +675,9 @@ Before returning the JSON:
         model=DEFAULT_MODEL,
     )
 
-    # -----------------------------------------------------
-    # JSON parsing
-    # -----------------------------------------------------
+    # =====================================================
+    # JSON PARSING
+    # =====================================================
 
     return parse_json_response(
         raw_response
