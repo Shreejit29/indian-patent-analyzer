@@ -15,8 +15,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 RULES_FILE = BASE_DIR / "data" / "form2_rules.json"
 
 
+# ---------------------------------------------------------
+# RULE LOADING
+# ---------------------------------------------------------
+
 def load_form2_rules() -> list[dict[str, Any]]:
-    """Load Indian patent Form 2 rules from the local JSON database."""
+    """Load Indian patent Form 2 rules from the local JSON file."""
 
     if not RULES_FILE.exists():
         raise FileNotFoundError(
@@ -27,54 +31,81 @@ def load_form2_rules() -> list[dict[str, Any]]:
         data = json.load(file)
 
     if isinstance(data, dict):
-        return data.get("rules", [])
+        rules = data.get("rules", [])
 
-    if isinstance(data, list):
-        return data
+    elif isinstance(data, list):
+        rules = data
 
-    raise ValueError("Invalid form2_rules.json format.")
+    else:
+        raise ValueError(
+            "Invalid form2_rules.json format."
+        )
+
+    if not isinstance(rules, list):
+        raise ValueError(
+            "The 'rules' section must be a list."
+        )
+
+    return rules
 
 
-def rules_to_text(rules: list[dict[str, Any]]) -> str:
-    """Convert structured rules into concise text for Gemini."""
+def rules_to_text(
+    rules: list[dict[str, Any]]
+) -> str:
+    """Convert structured rules into text for Gemini."""
 
     lines = []
 
     for rule in rules:
+
+        if not isinstance(rule, dict):
+            continue
+
         rule_id = rule.get("id", "")
         provision = rule.get("provision", "")
         requirement = rule.get("requirement", "")
-        source = rule.get("source_reference", "")
+        source = rule.get(
+            "source_reference",
+            ""
+        )
 
         lines.append(
-            f"{rule_id} | {provision} | "
-            f"{requirement} | Source: {source}"
+            f"{rule_id} | "
+            f"{provision} | "
+            f"{requirement} | "
+            f"Source: {source}"
         )
 
     return "\n".join(lines)
 
 
-def extract_claim_text(text: str) -> str:
-    """
-    Extract the claims section for the dedicated claim analyzer.
+# ---------------------------------------------------------
+# CLAIM EXTRACTION
+# ---------------------------------------------------------
 
-    This is intentionally simple at MVP stage. The rule engine performs
-    the primary claim extraction and later versions can use more robust
-    section detection.
+def extract_claim_text(
+    text: str
+) -> str:
+    """
+    Extract the claims section from the patent document.
+
+    This is a first-stage extraction method. More advanced
+    section detection can be added later.
     """
 
     lower_text = text.lower()
 
     claim_markers = [
-        "claims",
-        "claims:",
         "what is claimed is",
         "we claim",
+        "claims:",
+        "claims",
     ]
 
     start = -1
 
     for marker in claim_markers:
+
         position = lower_text.find(marker)
 
         if position != -1:
@@ -87,6 +118,229 @@ def extract_claim_text(text: str) -> str:
     return text[start:]
 
 
+def normalize_claims_for_analyzer(
+    claims: Any
+) -> list[dict[str, Any]]:
+    """
+    Convert claims returned by the rule engine into the
+    dictionary format expected by claim_analyzer.py.
+
+    Handles:
+    - string claims
+    - dictionary claims
+    - mixed lists
+    """
+
+    normalized = []
+
+    if not isinstance(claims, list):
+        return normalized
+
+    for index, claim in enumerate(
+        claims,
+        start=1,
+    ):
+
+        # -------------------------------------------------
+        # Claim already in dictionary format
+        # -------------------------------------------------
+
+        if isinstance(claim, dict):
+
+            claim_record = dict(claim)
+
+            if not claim_record.get(
+                "claim_number"
+            ):
+                claim_record["claim_number"] = index
+
+            normalized.append(
+                claim_record
+            )
+
+            continue
+
+        # -------------------------------------------------
+        # Claim returned as a string
+        # -------------------------------------------------
+
+        if isinstance(claim, str):
+
+            claim_text = claim.strip()
+
+            if not claim_text:
+                continue
+
+            normalized.append(
+                {
+                    "claim_number": index,
+                    "text": claim_text,
+                }
+            )
+
+    return normalized
+
+
+def prepare_claim_analysis(
+    rule_analysis: dict[str, Any],
+    claim_text: str,
+) -> dict[str, Any]:
+    """
+    Prepare claims and send them to the deterministic
+    claim analyzer.
+    """
+
+    if not claim_text.strip():
+
+        return {
+            "claims": [],
+            "claim_count": 0,
+            "independent_claims": [],
+            "dependent_claims": [],
+            "issues": [
+                {
+                    "type": "missing_claim_section",
+                    "severity": "high",
+                    "message": (
+                        "A claims section could not "
+                        "be identified."
+                    ),
+                }
+            ],
+        }
+
+    # Try claims extracted by rule_engine first.
+    extracted_claims = rule_analysis.get(
+        "claims",
+        []
+    )
+
+    normalized_claims = normalize_claims_for_analyzer(
+        extracted_claims
+    )
+
+    # -----------------------------------------------------
+    # If rule engine did not provide usable claims,
+    # create a basic numbered claim list from the text.
+    # -----------------------------------------------------
+
+    if not normalized_claims:
+
+        lines = claim_text.splitlines()
+
+        current_claim = None
+        current_number = None
+        fallback_claims = []
+
+        for line in lines:
+
+            stripped = line.strip()
+
+            if not stripped:
+                continue
+
+            # Detect numbered claims:
+            # 1. ...
+            # 2. ...
+            # 10. ...
+            parts = stripped.split(".", 1)
+
+            if (
+                len(parts) == 2
+                and parts[0].strip().isdigit()
+            ):
+
+                if current_claim:
+
+                    fallback_claims.append(
+                        {
+                            "claim_number": current_number,
+                            "text": current_claim.strip(),
+                        }
+                    )
+
+                current_number = int(
+                    parts[0].strip()
+                )
+
+                current_claim = parts[1].strip()
+
+            else:
+
+                if current_claim is not None:
+                    current_claim += " " + stripped
+
+        # Add final claim
+        if current_claim:
+
+            fallback_claims.append(
+                {
+                    "claim_number": current_number,
+                    "text": current_claim.strip(),
+                }
+            )
+
+        normalized_claims = fallback_claims
+
+    # -----------------------------------------------------
+    # Run deterministic claim analyzer
+    # -----------------------------------------------------
+
+    if normalized_claims:
+
+        try:
+
+            return analyze_claims(
+                normalized_claims
+            )
+
+        except AttributeError as exc:
+
+            # Defensive fallback so that one malformed claim
+            # does not crash the entire Streamlit application.
+
+            return {
+                "claims": normalized_claims,
+                "claim_count": len(
+                    normalized_claims
+                ),
+                "independent_claims": [],
+                "dependent_claims": [],
+                "issues": [
+                    {
+                        "type": "claim_analyzer_error",
+                        "severity": "high",
+                        "message": (
+                            "The claim analyzer could not "
+                            "process the extracted claim format."
+                        ),
+                        "technical_detail": str(exc),
+                    }
+                ],
+            }
+
+    return {
+        "claims": [],
+        "claim_count": 0,
+        "independent_claims": [],
+        "dependent_claims": [],
+        "issues": [
+            {
+                "type": "claim_extraction_failed",
+                "severity": "high",
+                "message": (
+                    "A claims section was found, but "
+                    "individual claims could not be extracted."
+                ),
+            }
+        ],
+    }
+
+
+# ---------------------------------------------------------
+# GEMINI CONTEXT
+# ---------------------------------------------------------
+
 def build_gemini_context(
     document_text: str,
     rule_analysis: dict[str, Any],
@@ -94,16 +348,25 @@ def build_gemini_context(
 ) -> str:
     """Build structured context for Gemini."""
 
+    context = {
+        "document_statistics": get_document_statistics(
+            document_text
+        ),
+        "rule_engine_analysis": rule_analysis,
+        "claim_engine_analysis": claim_analysis,
+    }
+
     return json.dumps(
-        {
-            "document_statistics": get_document_statistics(document_text),
-            "rule_engine_analysis": rule_analysis,
-            "claim_engine_analysis": claim_analysis,
-        },
+        context,
         indent=2,
         ensure_ascii=False,
+        default=str,
     )
 
+
+# ---------------------------------------------------------
+# MAIN ANALYZER
+# ---------------------------------------------------------
 
 def analyze_document(
     file_bytes: bytes,
@@ -116,22 +379,23 @@ def analyze_document(
     Run the complete patent analysis pipeline.
 
     Pipeline:
-        File
-        ↓
-        Text extraction
-        ↓
-        Rule engine
-        ↓
-        Claim analyzer
-        ↓
+
+        PDF/DOCX
+            ↓
+        Text Extraction
+            ↓
+        IPO Rule Engine
+            ↓
+        Claim Analyzer
+            ↓
         Gemini
-        ↓
-        Combined analysis
+            ↓
+        Combined Analysis
     """
 
-    # ---------------------------------------------------------
-    # 1. Extract document text
-    # ---------------------------------------------------------
+    # =====================================================
+    # 1. EXTRACT DOCUMENT TEXT
+    # =====================================================
 
     document_text = extract_text_from_file(
         file_bytes=file_bytes,
@@ -139,55 +403,58 @@ def analyze_document(
     )
 
     if not document_text.strip():
+
         raise ValueError(
-            "No readable text was extracted from the uploaded document."
+            "No readable text was extracted "
+            "from the uploaded document."
         )
 
-    # ---------------------------------------------------------
-    # 2. Basic document statistics
-    # ---------------------------------------------------------
+    # =====================================================
+    # 2. DOCUMENT STATISTICS
+    # =====================================================
 
-    statistics = get_document_statistics(document_text)
+    statistics = get_document_statistics(
+        document_text
+    )
 
-    # ---------------------------------------------------------
-    # 3. Load Indian patent rules
-    # ---------------------------------------------------------
+    # =====================================================
+    # 3. LOAD VERIFIED RULES
+    # =====================================================
 
     rules = load_form2_rules()
-    rules_text = rules_to_text(rules)
 
-    # ---------------------------------------------------------
-    # 4. Run deterministic Form 2 checks
-    # ---------------------------------------------------------
+    rules_text = rules_to_text(
+        rules
+    )
 
-    rule_analysis = analyze_form2_document(document_text)
+    # =====================================================
+    # 4. RUN DETERMINISTIC FORM 2 ANALYSIS
+    # =====================================================
 
-    # ---------------------------------------------------------
-    # 5. Run claim analysis
-    # ---------------------------------------------------------
+    rule_analysis = analyze_form2_document(
+        document_text
+    )
 
-    claim_text = extract_claim_text(document_text)
+    # =====================================================
+    # 5. EXTRACT CLAIM SECTION
+    # =====================================================
 
-    if claim_text:
-        claim_analysis = analyze_claims(claim_text)
-    else:
-        claim_analysis = {
-            "claims": [],
-            "claim_count": 0,
-            "independent_claims": [],
-            "dependent_claims": [],
-            "issues": [
-                {
-                    "type": "missing_claim_section",
-                    "severity": "high",
-                    "message": "A claims section could not be identified.",
-                }
-            ],
-        }
+    claim_text = extract_claim_text(
+        document_text
+    )
 
-    # ---------------------------------------------------------
-    # 6. Build context for Gemini
-    # ---------------------------------------------------------
+    # =====================================================
+    # 6. RUN CLAIM ANALYZER
+    # =====================================================
+
+    claim_analysis = prepare_claim_analysis(
+        rule_analysis=rule_analysis,
+        claim_text=claim_text,
+    )
+
+    # =====================================================
+    # 7. BUILD GEMINI CONTEXT
+    # =====================================================
 
     analysis_context = build_gemini_context(
         document_text=document_text,
@@ -195,9 +462,9 @@ def analyze_document(
         claim_analysis=claim_analysis,
     )
 
-    # ---------------------------------------------------------
-    # 7. Send document + verified local rules to Gemini
-    # ---------------------------------------------------------
+    # =====================================================
+    # 8. GEMINI ANALYSIS
+    # =====================================================
 
     gemini_prompt = f"""
 You are analyzing an Indian patent document.
@@ -209,27 +476,35 @@ ANALYSIS LEVEL:
 {analysis_level}
 
 IMPORTANT:
-Use the supplied Indian Patent Office rule information as the
+
+Use the supplied Indian patent rule information as the
 verified legal/formal reference.
 
 Do not invent provisions.
+
+Do not fabricate legal citations.
 
 Do not treat drafting suggestions as legal requirements.
 
 Do not introduce new technical matter.
 
-Do not state that the patent will definitely be granted or rejected.
+Do not state that the patent will definitely be granted
+or rejected.
 
-Return a structured analysis that can be combined with the
-deterministic analysis already performed by the application.
+The deterministic analysis below is generated by the
+application and should be treated as supporting analysis,
+not automatically as legal conclusions.
 
-VERIFIED LOCAL RULE INFORMATION:
+VERIFIED INDIAN PATENT RULE INFORMATION:
+
 {rules_text}
 
 APPLICATION ANALYSIS CONTEXT:
+
 {analysis_context}
 
 PATENT DOCUMENT:
+
 {document_text}
 """
 
@@ -237,15 +512,18 @@ PATENT DOCUMENT:
         patent_text=gemini_prompt,
         rules_text=rules_text,
         api_key=api_key,
+        analysis_level=analysis_level,
     )
 
-    # ---------------------------------------------------------
-    # 8. Combine all analysis
-    # ---------------------------------------------------------
+    # =====================================================
+    # 9. COMBINE RESULTS
+    # =====================================================
 
     return {
         "document_name": filename,
+
         "document_type": document_type,
+
         "analysis_level": analysis_level,
 
         "document_statistics": statistics,
