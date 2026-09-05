@@ -10,13 +10,26 @@ from services.document_parser import (
 )
 from services.gemini_service import analyze_patent_text
 from services.manual_parser import parse_manual_pdf
-from services.manual_retriever import build_manual_evidence, format_manual_evidence
+from services.manual_retriever import (
+    build_manual_evidence,
+    format_manual_evidence,
+)
 from services.rule_engine import analyze_form2_document
 
 
+# ============================================================
+# PROJECT PATHS
+# ============================================================
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-RULES_FILE = BASE_DIR / "data" / "form2_rules.json"
+FORM2_RULES_FILE = (
+    BASE_DIR / "data" / "form2_rules.json"
+)
+
+PATENT_RULES_FILE = (
+    BASE_DIR / "data" / "patent_rules.json"
+)
 
 MANUAL_FILE = (
     BASE_DIR
@@ -26,14 +39,30 @@ MANUAL_FILE = (
 )
 
 
-def load_form2_rules() -> List[Dict[str, Any]]:
-    """Load the deterministic Form 2 rules."""
+# ============================================================
+# RULE DATABASE
+# ============================================================
 
-    if not RULES_FILE.exists():
+def load_json_rules(
+    file_path: Path,
+) -> List[Dict[str, Any]]:
+    """
+    Load rules from a JSON file.
+
+    Supports both:
+        - a direct JSON list
+        - {"rules": [...]}
+    """
+
+    if not file_path.exists():
         return []
 
     try:
-        with open(RULES_FILE, "r", encoding="utf-8") as file:
+        with open(
+            file_path,
+            "r",
+            encoding="utf-8",
+        ) as file:
             data = json.load(file)
 
         if isinstance(data, list):
@@ -48,33 +77,62 @@ def load_form2_rules() -> List[Dict[str, Any]]:
     return []
 
 
-def rules_to_text(rules: List[Dict[str, Any]]) -> str:
-    """Convert rules into compact text for Gemini."""
+def load_form2_rules() -> List[Dict[str, Any]]:
+    """Load Form 2 specific rules."""
+
+    return load_json_rules(
+        FORM2_RULES_FILE
+    )
+
+
+def load_patent_rules() -> List[Dict[str, Any]]:
+    """Load the broader Indian patent rules database."""
+
+    return load_json_rules(
+        PATENT_RULES_FILE
+    )
+
+
+def rules_to_text(
+    rules: List[Dict[str, Any]],
+) -> str:
+    """
+    Convert rules into compact text for Gemini.
+    """
 
     if not rules:
-        return "No local Form 2 rules were loaded."
+        return "No local rules were loaded."
 
     parts = []
 
     for rule in rules:
         parts.append(
             f"Provision: {rule.get('provision', '')}\n"
+            f"Category: {rule.get('category', '')}\n"
             f"Title: {rule.get('title', '')}\n"
             f"Requirement: {rule.get('requirement', '')}\n"
             f"Analysis Type: {rule.get('analysis_type', '')}\n"
             f"Severity: {rule.get('severity', '')}\n"
-            f"Source Status: {rule.get('source_status', '')}"
+            f"Source Status: {rule.get('source_status', '')}\n"
+            f"Authority: {rule.get('authority', '')}\n"
+            f"Source Reference: {rule.get('source_reference', '')}"
         )
 
     return "\n\n".join(parts)
 
 
-def extract_claims_section(text: str) -> str:
+# ============================================================
+# CLAIM EXTRACTION
+# ============================================================
+
+def extract_claims_section(
+    text: str,
+) -> str:
     """
     Extract the claims portion of a patent specification.
 
-    This is intentionally conservative because claim formatting
-    varies significantly between documents.
+    Different patent documents use different claim headings,
+    so several patterns are supported.
     """
 
     if not text:
@@ -89,7 +147,12 @@ def extract_claims_section(text: str) -> str:
     start = None
 
     for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+
+        match = re.search(
+            pattern,
+            text,
+            re.IGNORECASE | re.MULTILINE,
+        )
 
         if match:
             start = match.end()
@@ -100,7 +163,7 @@ def extract_claims_section(text: str) -> str:
 
     remaining = text[start:]
 
-    # Stop if a new major section appears after claims.
+    # Stop at likely sections following claims.
     stop_patterns = [
         r"\n\s*abstract\b",
         r"\n\s*drawings?\b",
@@ -111,6 +174,7 @@ def extract_claims_section(text: str) -> str:
     end_positions = []
 
     for pattern in stop_patterns:
+
         match = re.search(
             pattern,
             remaining,
@@ -118,45 +182,66 @@ def extract_claims_section(text: str) -> str:
         )
 
         if match:
-            end_positions.append(match.start())
+            end_positions.append(
+                match.start()
+            )
 
     if end_positions:
-        remaining = remaining[: min(end_positions)]
+        remaining = remaining[
+            : min(end_positions)
+        ]
 
     return remaining.strip()
 
+
+# ============================================================
+# CLAIM NORMALIZATION
+# ============================================================
 
 def normalize_claims_for_analyzer(
     claims: List[Any],
 ) -> List[Dict[str, Any]]:
     """
-    Convert claims returned by different extraction methods
-    into the structure expected by claim_analyzer.py.
+    Convert claims returned by the rule engine into the
+    structure expected by claim_analyzer.py.
     """
 
     normalized = []
 
-    for index, claim in enumerate(claims, start=1):
+    for index, claim in enumerate(
+        claims,
+        start=1,
+    ):
 
         if isinstance(claim, dict):
+
             claim_number = claim.get(
                 "claim_number",
-                claim.get("number", index),
+                claim.get(
+                    "number",
+                    index,
+                ),
             )
 
             claim_text = claim.get(
                 "claim_text",
-                claim.get("text", ""),
+                claim.get(
+                    "text",
+                    "",
+                ),
             )
 
             normalized.append(
                 {
                     "claim_number": claim_number,
-                    "claim_text": str(claim_text).strip(),
+                    "claim_text": str(
+                        claim_text
+                    ).strip(),
                 }
             )
 
         elif isinstance(claim, str):
+
             normalized.append(
                 {
                     "claim_number": index,
@@ -171,30 +256,50 @@ def normalize_claims_for_analyzer(
     ]
 
 
-def parse_numbered_claims(claim_text: str) -> List[Dict[str, Any]]:
+def parse_numbered_claims(
+    claim_text: str,
+) -> List[Dict[str, Any]]:
     """
-    Fallback claim parser for documents containing numbered claims.
+    Fallback parser for numbered claims such as:
+
+    1. A system comprising...
+    2. The system of claim 1...
+    3. ...
     """
 
     if not claim_text:
         return []
 
     pattern = re.compile(
-        r"(?:^|\n)\s*(\d+)\s*[\.\)]\s*(.*?)(?=\n\s*\d+\s*[\.\)]|\Z)",
+        r"(?:^|\n)"
+        r"\s*(\d+)"
+        r"\s*[\.\)]"
+        r"\s*(.*?)"
+        r"(?=\n\s*\d+\s*[\.\)]|\Z)",
         re.IGNORECASE | re.DOTALL,
     )
 
-    matches = pattern.findall(claim_text)
+    matches = pattern.findall(
+        claim_text
+    )
 
     claims = []
 
     for number, text in matches:
-        cleaned = re.sub(r"\s+", " ", text).strip()
+
+        cleaned = re.sub(
+            r"\s+",
+            " ",
+            text,
+        ).strip()
 
         if cleaned:
+
             claims.append(
                 {
-                    "claim_number": int(number),
+                    "claim_number": int(
+                        number
+                    ),
                     "claim_text": cleaned,
                 }
             )
@@ -202,13 +307,20 @@ def parse_numbered_claims(claim_text: str) -> List[Dict[str, Any]]:
     return claims
 
 
+# ============================================================
+# CLAIM ANALYSIS
+# ============================================================
+
 def prepare_claim_analysis(
     rule_analysis: Dict[str, Any],
     claim_text: str,
 ) -> Dict[str, Any]:
-    """Prepare claims for the deterministic claim analyzer."""
+    """
+    Prepare claims for deterministic claim analysis.
+    """
 
     if not claim_text:
+
         return {
             "status": "not_available",
             "claims": [],
@@ -216,24 +328,38 @@ def prepare_claim_analysis(
                 {
                     "type": "missing_claims",
                     "severity": "high",
-                    "message": "No claims section could be identified.",
+                    "message": (
+                        "No claims section could be identified."
+                    ),
                 }
             ],
         }
 
-    extracted_claims = rule_analysis.get("claims", [])
-
-    normalized_claims = normalize_claims_for_analyzer(
-        extracted_claims
+    extracted_claims = rule_analysis.get(
+        "claims",
+        [],
     )
 
-    # Fallback if rule engine could not identify claims.
+    normalized_claims = (
+        normalize_claims_for_analyzer(
+            extracted_claims
+        )
+    )
+
+    # --------------------------------------------------------
+    # Fallback parser
+    # --------------------------------------------------------
+
     if not normalized_claims:
-        normalized_claims = parse_numbered_claims(
-            claim_text
+
+        normalized_claims = (
+            parse_numbered_claims(
+                claim_text
+            )
         )
 
     if not normalized_claims:
+
         return {
             "status": "unable_to_parse",
             "claims": [],
@@ -242,15 +368,23 @@ def prepare_claim_analysis(
                     "type": "claim_parsing",
                     "severity": "medium",
                     "message": (
-                        "A claims section was detected, but "
-                        "individual claims could not be reliably parsed."
+                        "A claims section was detected, "
+                        "but individual claims could not "
+                        "be reliably parsed."
                     ),
                 }
             ],
         }
 
+    # --------------------------------------------------------
+    # Claim analyzer
+    # --------------------------------------------------------
+
     try:
-        analysis = analyze_claims(normalized_claims)
+
+        analysis = analyze_claims(
+            normalized_claims
+        )
 
         return {
             "status": "completed",
@@ -258,6 +392,7 @@ def prepare_claim_analysis(
         }
 
     except Exception as error:
+
         return {
             "status": "error",
             "claims": [],
@@ -271,71 +406,17 @@ def prepare_claim_analysis(
         }
 
 
-def build_manual_queries(
-    document_type: str,
-    rule_analysis: Dict[str, Any],
-    claim_analysis: Dict[str, Any],
-) -> List[str]:
-    """
-    Build targeted searches for the Patent Manual.
-
-    The whole manual is NOT sent to Gemini.
-    Only relevant portions are retrieved.
-    """
-
-    queries = []
-
-    document_type_lower = (
-        document_type or ""
-    ).lower()
-
-    if "form 2" in document_type_lower:
-        queries.extend(
-            [
-                "provisional complete specification",
-                "complete specification contents",
-                "description invention operation use method",
-                "best method of performing invention",
-                "claims clear succinct fairly based",
-                "abstract complete specification",
-            ]
-        )
-
-    # Claims
-    claims = claim_analysis.get("claims", [])
-
-    if claims:
-        queries.extend(
-            [
-                "claims clarity succinctness",
-                "claims fairly based specification",
-                "independent dependent claims",
-                "claim drafting",
-            ]
-        )
-
-    # Common structural issues
-    for issue in rule_analysis.get("issues", []):
-        if isinstance(issue, dict):
-            message = issue.get("message", "")
-
-            if message:
-                queries.append(message)
-
-    # Remove duplicates while preserving order.
-    unique_queries = []
-
-    for query in queries:
-        if query and query not in unique_queries:
-            unique_queries.append(query)
-
-    return unique_queries
-
+# ============================================================
+# PATENT MANUAL
+# ============================================================
 
 def load_manual() -> Dict[str, Any]:
-    """Load and parse the local Patent Office Manual."""
+    """
+    Load and parse the local Patent Office Manual.
+    """
 
     if not MANUAL_FILE.exists():
+
         return {
             "status": "not_available",
             "page_count": 0,
@@ -345,21 +426,37 @@ def load_manual() -> Dict[str, Any]:
         }
 
     try:
-        with open(MANUAL_FILE, "rb") as file:
+
+        with open(
+            MANUAL_FILE,
+            "rb",
+        ) as file:
+
             manual_bytes = file.read()
 
-        parsed = parse_manual_pdf(manual_bytes)
+        parsed = parse_manual_pdf(
+            manual_bytes
+        )
 
         parsed["status"] = "loaded"
+
         parsed["source"] = (
-            "Manual of Patent Office Practice and Procedure"
+            "Manual of Patent Office Practice "
+            "and Procedure"
         )
-        parsed["version"] = "Version 3.0"
-        parsed["date"] = "26 November 2019"
+
+        parsed["version"] = (
+            "Version 3.0"
+        )
+
+        parsed["date"] = (
+            "26 November 2019"
+        )
 
         return parsed
 
     except Exception as error:
+
         return {
             "status": "error",
             "page_count": 0,
@@ -370,17 +467,128 @@ def load_manual() -> Dict[str, Any]:
         }
 
 
+# ============================================================
+# MANUAL QUERY GENERATION
+# ============================================================
+
+def build_manual_queries(
+    document_type: str,
+    rule_analysis: Dict[str, Any],
+    claim_analysis: Dict[str, Any],
+) -> List[str]:
+    """
+    Create targeted searches for the Patent Manual.
+    """
+
+    queries = []
+
+    document_type_lower = (
+        document_type or ""
+    ).lower()
+
+    # --------------------------------------------------------
+    # Form 2 / specification
+    # --------------------------------------------------------
+
+    if "form 2" in document_type_lower:
+
+        queries.extend(
+            [
+                "provisional complete specification",
+                "complete specification contents",
+                "description invention operation use method",
+                "best method of performing invention",
+                "claims clear succinct fairly based",
+                "abstract complete specification",
+                "drawings specification",
+            ]
+        )
+
+    # --------------------------------------------------------
+    # Claims
+    # --------------------------------------------------------
+
+    claims = claim_analysis.get(
+        "claims",
+        [],
+    )
+
+    if claims:
+
+        queries.extend(
+            [
+                "claims clarity succinctness",
+                "claims fairly based on specification",
+                "independent dependent claims",
+                "claim drafting",
+                "claim scope",
+            ]
+        )
+
+    # --------------------------------------------------------
+    # Rule-engine issues
+    # --------------------------------------------------------
+
+    for issue in rule_analysis.get(
+        "issues",
+        [],
+    ):
+
+        if isinstance(issue, dict):
+
+            message = issue.get(
+                "message",
+                "",
+            )
+
+            if message:
+                queries.append(
+                    message
+                )
+
+    # --------------------------------------------------------
+    # Remove duplicates
+    # --------------------------------------------------------
+
+    unique_queries = []
+
+    for query in queries:
+
+        query = query.strip()
+
+        if (
+            query
+            and query not in unique_queries
+        ):
+            unique_queries.append(
+                query
+            )
+
+    return unique_queries
+
+
+# ============================================================
+# MANUAL RETRIEVAL
+# ============================================================
+
 def prepare_manual_context(
     manual: Dict[str, Any],
     document_type: str,
     rule_analysis: Dict[str, Any],
     claim_analysis: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Retrieve relevant manual evidence."""
+    """
+    Retrieve only the relevant portions of the Patent Manual.
+    """
 
     if manual.get("status") != "loaded":
+
         return {
-            "status": manual.get("status", "not_available"),
+            "status": manual.get(
+                "status",
+                "not_available",
+            ),
+            "queries": [],
             "evidence": [],
             "context": "",
         }
@@ -391,24 +599,48 @@ def prepare_manual_context(
         claim_analysis=claim_analysis,
     )
 
+    if not queries:
+
+        return {
+            "status": "no_queries",
+            "queries": [],
+            "evidence": [],
+            "context": "",
+        }
+
     evidence = build_manual_evidence(
-        manual_chunks=manual.get("chunks", []),
+        manual_chunks=manual.get(
+            "chunks",
+            [],
+        ),
         queries=queries,
         max_results_per_query=2,
     )
 
-    # Remove duplicate chunks.
+    # --------------------------------------------------------
+    # Remove duplicate chunks
+    # --------------------------------------------------------
+
     unique_evidence = []
+
     seen_chunks = set()
 
     for item in evidence:
-        chunk_id = item.get("chunk_id")
+
+        chunk_id = item.get(
+            "chunk_id"
+        )
 
         if chunk_id in seen_chunks:
             continue
 
-        seen_chunks.add(chunk_id)
-        unique_evidence.append(item)
+        seen_chunks.add(
+            chunk_id
+        )
+
+        unique_evidence.append(
+            item
+        )
 
     context = format_manual_evidence(
         unique_evidence
@@ -421,6 +653,10 @@ def prepare_manual_context(
         "context": context,
     }
 
+
+# ============================================================
+# MAIN ANALYZER
+# ============================================================
 
 def analyze_document(
     file_bytes: bytes,
@@ -437,173 +673,390 @@ def analyze_document(
               ↓
         Document parser
               ↓
-        Rule engine
+        Form 2 rule engine
               ↓
         Claim engine
               ↓
         Patent Manual retrieval
               ↓
         Gemini
+              ↓
+        Final analysis
     """
 
-    # ---------------------------------------------------------
-    # 1. Extract patent document text
-    # ---------------------------------------------------------
+    # ========================================================
+    # 1. EXTRACT PATENT DOCUMENT
+    # ========================================================
 
     text = extract_text_from_file(
         file_bytes,
         filename,
     )
 
-    statistics = get_document_statistics(text)
-
-    # ---------------------------------------------------------
-    # 2. Deterministic Form 2 analysis
-    # ---------------------------------------------------------
-
-    rules = load_form2_rules()
-
-    rule_analysis = analyze_form2_document(text)
-
-    # ---------------------------------------------------------
-    # 3. Extract claims
-    # ---------------------------------------------------------
-
-    claim_text = extract_claims_section(text)
-
-    # ---------------------------------------------------------
-    # 4. Claim analysis
-    # ---------------------------------------------------------
-
-    claim_analysis = prepare_claim_analysis(
-        rule_analysis=rule_analysis,
-        claim_text=claim_text,
+    statistics = (
+        get_document_statistics(
+            text
+        )
     )
 
-    # ---------------------------------------------------------
-    # 5. Load Patent Office Manual
-    # ---------------------------------------------------------
+    # ========================================================
+    # 2. LOAD KNOWLEDGE BASES
+    # ========================================================
+
+    form2_rules = (
+        load_form2_rules()
+    )
+
+    patent_rules = (
+        load_patent_rules()
+    )
+
+    # ========================================================
+    # 3. FORM 2 RULE ENGINE
+    # ========================================================
+
+    rule_analysis = (
+        analyze_form2_document(
+            text
+        )
+    )
+
+    # ========================================================
+    # 4. EXTRACT CLAIMS
+    # ========================================================
+
+    claim_text = (
+        extract_claims_section(
+            text
+        )
+    )
+
+    # ========================================================
+    # 5. CLAIM ENGINE
+    # ========================================================
+
+    claim_analysis = (
+        prepare_claim_analysis(
+            rule_analysis=rule_analysis,
+            claim_text=claim_text,
+        )
+    )
+
+    # ========================================================
+    # 6. LOAD PATENT MANUAL
+    # ========================================================
 
     manual = load_manual()
 
-    # ---------------------------------------------------------
-    # 6. Retrieve only relevant manual sections
-    # ---------------------------------------------------------
+    # ========================================================
+    # 7. RETRIEVE RELEVANT MANUAL CONTENT
+    # ========================================================
 
-    manual_context = prepare_manual_context(
-        manual=manual,
-        document_type=document_type,
-        rule_analysis=rule_analysis,
-        claim_analysis=claim_analysis,
+    manual_context = (
+        prepare_manual_context(
+            manual=manual,
+            document_type=document_type,
+            rule_analysis=rule_analysis,
+            claim_analysis=claim_analysis,
+        )
     )
 
-    # ---------------------------------------------------------
-    # 7. Build Gemini context
-    # ---------------------------------------------------------
+    # ========================================================
+    # 8. CONVERT RULE DATABASES TO GEMINI CONTEXT
+    # ========================================================
 
-    rules_context = rules_to_text(rules)
+    form2_rules_context = (
+        rules_to_text(
+            form2_rules
+        )
+    )
+
+    patent_rules_context = (
+        rules_to_text(
+            patent_rules
+        )
+    )
+
+    # ========================================================
+    # 9. BUILD GEMINI CONTEXT
+    # ========================================================
 
     gemini_context = f"""
-DOCUMENT TYPE:
+
+============================================================
+DOCUMENT INFORMATION
+============================================================
+
+Document Type:
 {document_type}
 
-ANALYSIS LEVEL:
+Analysis Level:
 {analysis_level}
 
-==================================================
-AUTHORITATIVE LOCAL FORM 2 RULES
-==================================================
+Document Name:
+{filename}
 
-{rules_context}
 
-==================================================
-DETERMINISTIC RULE ENGINE ANALYSIS
-==================================================
+============================================================
+AUTHORITATIVE FORM 2 RULE DATABASE
+============================================================
 
-{json.dumps(rule_analysis, indent=2, ensure_ascii=False)}
+The following local database contains Form 2 related
+requirements.
 
-==================================================
+{form2_rules_context}
+
+
+============================================================
+INDIAN PATENT ACT / RULES DATABASE
+============================================================
+
+The following local database contains Indian patent
+provisions and procedural rules.
+
+Use these provisions as the primary legal/statutory
+reference available in this application.
+
+{patent_rules_context}
+
+
+============================================================
+DETERMINISTIC FORM 2 ANALYSIS
+============================================================
+
+The application performed the following preliminary
+rule-based analysis:
+
+{json.dumps(
+    rule_analysis,
+    indent=2,
+    ensure_ascii=False,
+)}
+
+
+============================================================
 CLAIM ENGINE ANALYSIS
-==================================================
+============================================================
 
-{json.dumps(claim_analysis, indent=2, ensure_ascii=False)}
+The application performed the following preliminary
+claim analysis:
 
-==================================================
+{json.dumps(
+    claim_analysis,
+    indent=2,
+    ensure_ascii=False,
+)}
+
+
+============================================================
 PATENT OFFICE MANUAL GUIDANCE
-==================================================
+============================================================
 
-The following material is retrieved from the local
-Manual of Patent Office Practice and Procedure.
+The following information has been retrieved from the
+local Manual of Patent Office Practice and Procedure.
 
-It is guidance/procedural material and must NOT be
-treated as overriding the Patents Act or Patents Rules.
+Manual:
+Manual of Patent Office Practice and Procedure
 
-{manual_context.get("context", "No relevant manual guidance retrieved.")}
+Version:
+Version 3.0
 
-==================================================
+Date:
+26 November 2019
+
+IMPORTANT:
+
+The Patent Manual is procedural/practical guidance.
+It must NOT be treated as legislation.
+
+The Manual must not override the Patents Act,
+Patents Rules, Gazette notifications, or applicable
+official guidelines.
+
+Relevant Manual Evidence:
+
+{
+    manual_context.get(
+        "context",
+        "No relevant manual guidance was retrieved.",
+    )
+}
+
+
+============================================================
 SOURCE HIERARCHY
-==================================================
+============================================================
 
-Use the following hierarchy:
+When assessing an issue, follow this hierarchy:
 
-1. Patents Act and applicable statutory provisions
-2. Patents Rules and applicable amendments
-3. Official Patent Office guidelines/manuals
-4. Deterministic checks performed by this application
-5. Drafting suggestions
+1. Patents Act, 1970
+2. Applicable Patents Rules
+3. Official amendments / Gazette notifications
+4. Official Patent Office guidelines
+5. Patent Office Manual
+6. Deterministic checks performed by this application
+7. Drafting suggestions
 
-Do not present the Patent Manual as having the force
-of law.
+If sources conflict, do not silently resolve the conflict.
 
-Do not fabricate provisions, case law, citations,
-rules, page numbers or examination objections.
+Identify the conflict and state that the current
+applicable statutory or official source should be checked.
 
-==================================================
+
+============================================================
+ANALYSIS CLASSIFICATION
+============================================================
+
+Every identified issue should be classified where
+appropriate as one of:
+
+1. LEGAL / FORMAL REQUIREMENT
+
+A requirement arising from the applicable Act, Rules,
+forms or other authoritative source.
+
+2. EXAMINATION RISK
+
+An issue that may attract an objection or require
+clarification during examination.
+
+3. DRAFTING SUGGESTION
+
+An improvement to clarity, consistency, precision,
+readability or drafting quality that is not itself
+necessarily a legal defect.
+
+
+============================================================
+IMPORTANT SAFEGUARDS
+============================================================
+
+Do NOT:
+
+- fabricate Indian patent provisions
+- fabricate rules
+- fabricate case law
+- fabricate official citations
+- invent Patent Manual page numbers
+- claim that a patent will definitely be granted
+- claim that a patent will definitely be rejected
+- introduce new matter into the invention
+- silently modify the applicant's invention
+- treat drafting suggestions as statutory requirements
+- treat the Patent Manual as having the force of law
+
+Clearly distinguish:
+
+- statutory/legal requirement
+- examination risk
+- drafting suggestion
+- preliminary heuristic observation
+
+
+============================================================
 PATENT DOCUMENT
-==================================================
+============================================================
+
+The following is the extracted text of the patent
+document being analyzed:
 
 {text}
+
 """
 
-    # ---------------------------------------------------------
-    # 8. Gemini analysis
-    # ---------------------------------------------------------
+    # ========================================================
+    # 10. GEMINI
+    # ========================================================
 
-    gemini_analysis = analyze_patent_text(
-        patent_text=text,
-        context=gemini_context,
-        document_type=document_type,
-        analysis_level=analysis_level,
+    gemini_analysis = (
+        analyze_patent_text(
+            patent_text=text,
+            context=gemini_context,
+            document_type=document_type,
+            analysis_level=analysis_level,
+        )
     )
 
-    # ---------------------------------------------------------
-    # 9. Final result
-    # ---------------------------------------------------------
+    # ========================================================
+    # 11. FINAL RESULT
+    # ========================================================
 
     return {
         "document_name": filename,
+
         "document_type": document_type,
+
         "analysis_level": analysis_level,
+
         "document_statistics": statistics,
+
+        # ----------------------------------------------------
+        # Deterministic analysis
+        # ----------------------------------------------------
 
         "rule_engine": rule_analysis,
 
         "claim_engine": claim_analysis,
 
+        # ----------------------------------------------------
+        # Patent Manual
+        # ----------------------------------------------------
+
         "manual": {
-            "status": manual.get("status"),
-            "source": manual.get("source"),
-            "version": manual.get("version"),
-            "date": manual.get("date"),
-            "page_count": manual.get("page_count", 0),
-            "retrieval_status": manual_context.get("status"),
-            "queries": manual_context.get("queries", []),
-            "evidence": manual_context.get("evidence", []),
+            "status": manual.get(
+                "status"
+            ),
+
+            "source": manual.get(
+                "source"
+            ),
+
+            "version": manual.get(
+                "version"
+            ),
+
+            "date": manual.get(
+                "date"
+            ),
+
+            "page_count": manual.get(
+                "page_count",
+                0,
+            ),
+
+            "retrieval_status": manual_context.get(
+                "status"
+            ),
+
+            "queries": manual_context.get(
+                "queries",
+                [],
+            ),
+
+            "evidence": manual_context.get(
+                "evidence",
+                [],
+            ),
         },
+
+        # ----------------------------------------------------
+        # Gemini
+        # ----------------------------------------------------
 
         "gemini_analysis": gemini_analysis,
 
-        "rules_used": rules,
+        # ----------------------------------------------------
+        # Knowledge sources
+        # ----------------------------------------------------
+
+        "rules_used": {
+            "form2_rules": form2_rules,
+            "patent_rules": patent_rules,
+        },
+
+        # ----------------------------------------------------
+        # Status
+        # ----------------------------------------------------
 
         "status": "completed",
     }
