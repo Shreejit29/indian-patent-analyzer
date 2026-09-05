@@ -11,7 +11,23 @@ from services.report_generator import (
     generate_markdown_report,
     generate_text_report,
 )
+import google.genai
 
+st.sidebar.write(
+    "google-genai version:",
+    google.genai.__version__,
+)
+
+st.sidebar.write(
+    "Gemini key detected:",
+    bool(st.secrets.get("GEMINI_API_KEY")),
+)
+
+if "GEMINI_API_KEY" in st.secrets:
+    st.sidebar.write(
+        "Key prefix:",
+        str(st.secrets["GEMINI_API_KEY"])[:3],
+    )
 
 # ============================================================
 # PAGE CONFIGURATION
