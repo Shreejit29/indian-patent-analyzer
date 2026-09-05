@@ -37,6 +37,9 @@ if "uploaded_text" not in st.session_state:
 if "uploaded_filename" not in st.session_state:
     st.session_state.uploaded_filename = ""
 
+if "uploaded_bytes" not in st.session_state:
+    st.session_state.uploaded_bytes = None
+
 if "rewrite_result" not in st.session_state:
     st.session_state.rewrite_result = None
 
@@ -113,19 +116,23 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
 
-    file_bytes = uploaded_file.getvalue()
-
     try:
 
+        # Get original file bytes.
+        file_bytes = uploaded_file.getvalue()
+
+        # Extract text only for preview and rewrite workflow.
         extracted_text = extract_text_from_file(
             file_bytes,
             uploaded_file.name,
         )
 
+        # Store everything in session state.
+        st.session_state.uploaded_bytes = file_bytes
         st.session_state.uploaded_text = extracted_text
         st.session_state.uploaded_filename = uploaded_file.name
 
-        # Clear previous results when a new document is uploaded.
+        # New upload = clear previous results.
         st.session_state.analysis_result = None
         st.session_state.rewrite_result = None
 
@@ -133,7 +140,40 @@ if uploaded_file is not None:
             f"Document loaded: {uploaded_file.name}"
         )
 
-        with st.expander("Preview Extracted Text"):
+        # ----------------------------------------------------
+        # File information
+        # ----------------------------------------------------
+
+        info_col1, info_col2, info_col3 = st.columns(3)
+
+        with info_col1:
+
+            st.metric(
+                "File",
+                uploaded_file.name,
+            )
+
+        with info_col2:
+
+            st.metric(
+                "Size",
+                f"{len(file_bytes) / 1024:.1f} KB",
+            )
+
+        with info_col3:
+
+            st.metric(
+                "Characters",
+                f"{len(extracted_text):,}",
+            )
+
+        # ----------------------------------------------------
+        # Preview
+        # ----------------------------------------------------
+
+        with st.expander(
+            "Preview Extracted Text"
+        ):
 
             preview = extracted_text[:10000]
 
@@ -146,7 +186,7 @@ if uploaded_file is not None:
     except Exception as exc:
 
         st.error(
-            f"Unable to extract document text: {exc}"
+            f"Unable to process document: {exc}"
         )
 
 
@@ -174,7 +214,7 @@ with col2:
         disabled=(
             document_type
             != "Form 2 Complete Specification"
-            or not st.session_state.uploaded_text
+            or st.session_state.uploaded_bytes is None
         ),
     )
 
@@ -185,7 +225,7 @@ with col2:
 
 if analyze_button:
 
-    if not st.session_state.uploaded_text:
+    if st.session_state.uploaded_bytes is None:
 
         st.warning(
             "Please upload a PDF or DOCX document first."
@@ -199,9 +239,15 @@ if analyze_button:
 
             try:
 
+                # IMPORTANT:
+                # analyzer.py expects file_bytes, NOT text.
                 result = analyze_document(
-                    text=st.session_state.uploaded_text,
-                    filename=st.session_state.uploaded_filename,
+                    file_bytes=(
+                        st.session_state.uploaded_bytes
+                    ),
+                    filename=(
+                        st.session_state.uploaded_filename
+                    ),
                     document_type=document_type,
                     analysis_level=analysis_level,
                 )
@@ -241,7 +287,7 @@ if rewrite_button:
     else:
 
         # ----------------------------------------------------
-        # Use previous analysis as additional context
+        # Build analysis context
         # ----------------------------------------------------
 
         analysis_context = ""
@@ -297,7 +343,9 @@ if analysis:
 
     st.markdown("---")
 
-    st.header("Patent Analysis Dashboard")
+    st.header(
+        "Patent Analysis Dashboard"
+    )
 
     tabs = st.tabs(
         [
@@ -336,16 +384,26 @@ if analysis:
             "Executive Summary"
         )
 
-        if document_assessment:
+        if isinstance(
+            document_assessment,
+            dict,
+        ):
+
+            summary = document_assessment.get(
+                "summary",
+                document_assessment.get(
+                    "overall_assessment",
+                    "",
+                ),
+            )
+
+            if summary:
+                st.write(summary)
+
+        elif document_assessment:
 
             st.write(
-                document_assessment.get(
-                    "summary",
-                    document_assessment.get(
-                        "overall_assessment",
-                        "No summary available.",
-                    ),
-                )
+                document_assessment
             )
 
         score_columns = st.columns(4)
@@ -381,7 +439,10 @@ if analysis:
             ),
         ]
 
-        for column, (label, value) in zip(
+        for column, (
+            label,
+            value,
+        ) in zip(
             score_columns,
             score_items,
         ):
@@ -395,7 +456,7 @@ if analysis:
 
 
     # ========================================================
-    # FORM 2 ANALYSIS
+    # FORM 2
     # ========================================================
 
     with tabs[1]:
@@ -474,8 +535,14 @@ if analysis:
 
         gemini_sections = (
             analysis
-            .get("gemini_analysis", {})
-            .get("sections", [])
+            .get(
+                "gemini_analysis",
+                {},
+            )
+            .get(
+                "sections",
+                [],
+            )
         )
 
         if gemini_sections:
@@ -486,7 +553,10 @@ if analysis:
 
             for section in gemini_sections:
 
-                if isinstance(section, dict):
+                if isinstance(
+                    section,
+                    dict,
+                ):
 
                     section_name = section.get(
                         "section",
@@ -509,7 +579,7 @@ if analysis:
 
 
     # ========================================================
-    # CLAIM ANALYSIS
+    # CLAIMS
     # ========================================================
 
     with tabs[2]:
@@ -532,7 +602,10 @@ if analysis:
 
             for claim in claims:
 
-                if isinstance(claim, dict):
+                if isinstance(
+                    claim,
+                    dict,
+                ):
 
                     number = claim.get(
                         "claim_number",
@@ -600,8 +673,14 @@ if analysis:
 
         abstract_analysis = (
             analysis
-            .get("gemini_analysis", {})
-            .get("abstract_analysis", {})
+            .get(
+                "gemini_analysis",
+                {},
+            )
+            .get(
+                "abstract_analysis",
+                {},
+            )
         )
 
         if abstract_analysis:
@@ -614,8 +693,14 @@ if analysis:
 
             rule_abstract = (
                 analysis
-                .get("rule_engine", {})
-                .get("abstract", "")
+                .get(
+                    "rule_engine",
+                    {},
+                )
+                .get(
+                    "abstract",
+                    "",
+                )
             )
 
             if rule_abstract:
@@ -645,14 +730,26 @@ if analysis:
 
         gemini_issues = (
             analysis
-            .get("gemini_analysis", {})
-            .get("issues", [])
+            .get(
+                "gemini_analysis",
+                {},
+            )
+            .get(
+                "issues",
+                [],
+            )
         )
 
         rule_issues = (
             analysis
-            .get("rule_engine", {})
-            .get("issues", [])
+            .get(
+                "rule_engine",
+                {},
+            )
+            .get(
+                "issues",
+                [],
+            )
         )
 
         all_issues = []
@@ -693,7 +790,10 @@ if analysis:
 
                 issue = item["issue"]
 
-                if isinstance(issue, dict):
+                if isinstance(
+                    issue,
+                    dict,
+                ):
 
                     severity = issue.get(
                         "severity",
@@ -834,21 +934,30 @@ if rewrite:
 
         st.metric(
             "Rewrite Status",
-            summary["rewrite_status"],
+            summary.get(
+                "rewrite_status",
+                "UNKNOWN",
+            ),
         )
 
     with col2:
 
         st.metric(
             "Changed Claims",
-            summary["changed_claims"],
+            summary.get(
+                "changed_claims",
+                0,
+            ),
         )
 
     with col3:
 
         st.metric(
             "New-Matter Flags",
-            summary["flag_count"],
+            summary.get(
+                "flag_count",
+                0,
+            ),
         )
 
     with col4:
@@ -857,7 +966,10 @@ if rewrite:
             "Human Review",
             (
                 "REQUIRED"
-                if summary["human_review_required"]
+                if summary.get(
+                    "human_review_required",
+                    True,
+                )
                 else "NOT FLAGGED"
             ),
         )
@@ -1017,7 +1129,7 @@ if rewrite:
 
 
     # ========================================================
-    # REVISED FORM 2 SECTIONS
+    # REVISED SECTIONS
     # ========================================================
 
     revised_form2 = rewrite.get(
@@ -1071,7 +1183,10 @@ if rewrite:
             "",
         )
 
-        if isinstance(value, list):
+        if isinstance(
+            value,
+            list,
+        ):
 
             value = "\n".join(
                 str(item)
@@ -1080,7 +1195,9 @@ if rewrite:
 
         if value:
 
-            with st.expander(label):
+            with st.expander(
+                label
+            ):
 
                 st.text_area(
                     label,
@@ -1110,7 +1227,10 @@ if rewrite:
             start=1,
         ):
 
-            if isinstance(claim, dict):
+            if isinstance(
+                claim,
+                dict,
+            ):
 
                 claim_number = claim.get(
                     "claim_number",
@@ -1178,11 +1298,12 @@ if rewrite:
             "### Change Log"
         )
 
-        for index, change in enumerate(
-            change_log
-        ):
+        for change in change_log:
 
-            if isinstance(change, dict):
+            if isinstance(
+                change,
+                dict,
+            ):
 
                 section = change.get(
                     "section",
