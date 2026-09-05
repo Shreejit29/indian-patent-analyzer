@@ -2,27 +2,19 @@ import json
 from typing import Any, Dict, List
 
 from services.gemini_service import generate_response
+from services.new_matter_checker import assess_new_matter
 
-
-# ============================================================
-# FORM 2 REWRITER
-# ============================================================
 
 DEFAULT_REWRITE_MODEL = "gemini-3.6-flash"
 
 
-# ============================================================
-# JSON CLEANING
-# ============================================================
+def clean_json_response(text: str) -> str:
+    """Remove common Markdown wrappers around JSON."""
 
-def clean_json_response(
-    response_text: str,
-) -> str:
-    """
-    Remove Markdown code fences from Gemini JSON output.
-    """
+    if not text:
+        return ""
 
-    text = response_text.strip()
+    text = text.strip()
 
     if text.startswith("```json"):
         text = text[7:]
@@ -36,46 +28,40 @@ def clean_json_response(
     return text.strip()
 
 
-def parse_json_response(
-    response_text: str,
-) -> Dict[str, Any]:
-    """
-    Parse Gemini response as JSON.
-    """
+def parse_json_response(text: str) -> Dict[str, Any]:
+    """Parse Gemini JSON safely."""
 
-    cleaned = clean_json_response(
-        response_text
-    )
+    cleaned = clean_json_response(text)
 
     try:
+        result = json.loads(cleaned)
 
-        result = json.loads(
-            cleaned
-        )
+        if isinstance(result, dict):
+            return result
 
-    except json.JSONDecodeError as error:
+    except json.JSONDecodeError:
+        pass
 
-        raise ValueError(
-            "Gemini returned invalid JSON while "
-            "generating the revised Form 2. "
-            f"Response preview: {cleaned[:1500]}"
-        ) from error
+    # Try to recover JSON object embedded in text.
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
 
-    if not isinstance(
-        result,
-        dict,
-    ):
+    if start >= 0 and end > start:
+        try:
+            result = json.loads(
+                cleaned[start:end + 1]
+            )
 
-        raise ValueError(
-            "Form 2 rewrite response must be a JSON object."
-        )
+            if isinstance(result, dict):
+                return result
 
-    return result
+        except json.JSONDecodeError:
+            pass
 
+    raise ValueError(
+        "Gemini did not return valid JSON."
+    )
 
-# ============================================================
-# REWRITE PROMPT
-# ============================================================
 
 def build_rewrite_prompt(
     original_text: str,
@@ -83,523 +69,311 @@ def build_rewrite_prompt(
     analysis_level: str,
     analysis_context: str,
 ) -> str:
-    """
-    Build the controlled Form 2 rewriting prompt.
-    """
+    """Build the Form 2 rewriting prompt."""
 
     return f"""
-You are an expert AI-assisted Indian patent drafting engine.
+You are an Indian patent drafting and prosecution assistant.
 
-Your task is to prepare a PROPOSED REVISED FORM 2 COMPLETE
-SPECIFICATION based strictly on the supplied original patent
-document.
+Your task is to prepare a proposed revised Form 2 Complete Specification
+based ONLY on the applicant's existing disclosure.
 
-This is a drafting/revision task.
+This is a DRAFTING ASSISTANCE task.
 
-It is NOT a legal opinion and does NOT guarantee patentability,
-grant, validity, or compliance.
+Do NOT create new technical subject matter.
 
-============================================================
-DOCUMENT INFORMATION
-============================================================
+IMPORTANT LEGAL SAFEGUARD:
 
-Document Type:
-{document_type}
+The proposed revision must respect Section 59 of the Patents Act, 1970.
 
-Analysis Level:
-{analysis_level}
+An amendment should not result in the specification claiming or describing
+matter not in substance disclosed or shown in the specification before
+amendment.
 
-============================================================
-PRIMARY OBJECTIVE
-============================================================
+Claims must also remain within the permissible scope of the original
+claims where Section 59 applies.
 
-Improve the supplied patent specification by:
+The output must therefore be treated as a proposed draft requiring
+human patent-professional review.
 
-1. Improving organization.
-2. Improving clarity.
-3. Improving technical consistency.
-4. Improving patent drafting quality.
-5. Improving description-to-claim consistency.
-6. Improving claim clarity and structure.
-7. Improving abstract structure.
-8. Addressing identified drafting/formal concerns.
-9. Preserving the disclosed invention.
-10. Aligning the proposed drafting with the supplied
-    Indian patent rules and guidance.
+==================================================
+SOURCE HIERARCHY
+==================================================
 
-============================================================
-CRITICAL NO-NEW-MATTER RULE
-============================================================
+Use information in this order:
 
-THIS IS THE MOST IMPORTANT RULE.
+1. Original Form 2 text supplied by the applicant.
+2. Deterministic analysis of the original document.
+3. Indian Patents Act / Rules information supplied in the context.
+4. Patent Office Manual guidance supplied in the context.
+5. General drafting knowledge only for wording, organization and clarity.
 
-DO NOT INTRODUCE NEW TECHNICAL MATTER.
+Never invent technical facts.
 
-Every technical feature in the revised specification must
-be supported by the original patent document.
+==================================================
+WHAT YOU MAY CHANGE
+==================================================
 
-Do NOT:
+You MAY:
+
+- improve grammar;
+- improve sentence structure;
+- improve patent drafting language;
+- reorganize existing disclosure;
+- remove unnecessary repetition;
+- improve clarity;
+- improve consistency;
+- improve antecedent basis;
+- improve claim dependency wording;
+- improve section organization;
+- improve title wording when supported by the invention;
+- improve abstract wording;
+- correct obvious drafting errors;
+- make terminology consistent;
+- identify unclear or unsupported passages;
+- flag passages requiring human verification.
+
+You MUST NOT:
 
 - invent components;
-- invent dimensions;
 - invent materials;
-- invent numerical ranges;
+- invent dimensions;
 - invent experimental results;
 - invent advantages;
-- invent performance values;
-- invent technical effects;
-- invent algorithms;
-- invent processing steps;
+- invent performance data;
 - invent embodiments;
-- invent examples;
-- invent manufacturing methods;
-- invent biological characteristics;
-- invent chemical properties;
-- invent test results;
-- invent prior-art statements.
+- invent alternatives;
+- invent operating conditions;
+- invent technical relationships;
+- add unsupported claim limitations;
+- introduce new inventive concepts;
+- broaden the invention using information absent from the original disclosure.
 
-If an improvement would require new technical information,
-DO NOT add that information.
+If a useful patent-drafting statement is not supported by the original
+document, DO NOT add it.
 
-Instead:
-
-- preserve the original wording; OR
-- flag the matter for human review.
-
-============================================================
-SECTION 59 SAFEGUARD
-============================================================
-
-The proposed revision must not intentionally introduce
-matter not in substance disclosed in the original
-specification.
-
-Treat Section 59 as a strict drafting safeguard.
-
-Do not expand the technical scope merely to make the
-patent appear stronger.
-
-============================================================
-SOURCE HIERARCHY
-============================================================
-
-Use the supplied analysis context according to this hierarchy:
-
-1. Patents Act
-2. Applicable Patents Rules
-3. Official amendments / Gazette material
-4. Official Patent Office guidelines
-5. Patent Office Manual
-6. Deterministic application analysis
-7. Drafting reasoning
-
-The Patent Office Manual is practical/procedural guidance.
-It must not be treated as legislation.
-
-============================================================
-WHAT MAY BE REWRITTEN
-============================================================
-
-The following may be improved where supported:
-
-- grammar;
-- sentence structure;
-- terminology consistency;
-- paragraph organization;
-- section organization;
-- repetition;
-- ambiguous drafting;
-- antecedent references;
-- claim dependency wording;
-- claim structure;
-- abstract wording;
-- reference numeral consistency;
-- transitions between sections;
-- description organization.
-
-============================================================
-WHAT MUST NOT BE CHANGED
-============================================================
-
-Do not change:
-
-- the identity of the invention;
-- the disclosed technical concept;
-- technical components;
-- disclosed relationships;
-- disclosed operating steps;
-- disclosed materials;
-- disclosed parameters;
-- disclosed numerical ranges;
-- disclosed examples;
-- disclosed embodiments;
-
-unless the change is purely linguistic and preserves
-the original technical meaning.
-
-============================================================
+==================================================
 FORM 2 STRUCTURE
-============================================================
+==================================================
 
-Where the original document supports the information,
-organize the proposed specification into appropriate
-sections such as:
+Prepare the revised document using, where supported:
 
-1. TITLE OF THE INVENTION
+1. Title
+2. Field of Invention
+3. Background
+4. Objects of the Invention
+5. Summary of the Invention
+6. Brief Description of Drawings
+7. Detailed Description
+8. Claims
+9. Abstract
 
-2. FIELD OF THE INVENTION
+Do not force a section to contain information that does not exist.
 
-3. BACKGROUND OF THE INVENTION
-
-4. OBJECTS OF THE INVENTION
-
-5. SUMMARY OF THE INVENTION
-
-6. BRIEF DESCRIPTION OF THE DRAWINGS
-
-7. DETAILED DESCRIPTION OF THE INVENTION
-
-8. CLAIMS
-
-9. ABSTRACT
-
-Do not manufacture a section's substantive content if
-the original document does not disclose it.
-
-If a section is absent and cannot safely be reconstructed,
-mark it as:
-
-"[HUMAN INPUT REQUIRED]"
-
-rather than inventing content.
-
-============================================================
+==================================================
 TITLE
-============================================================
+==================================================
 
-Improve the title only if supported by the invention.
+The title should accurately identify the invention.
 
-The title should identify the specific subject matter.
+Do not introduce a new technical concept merely to improve the title.
 
-Avoid unnecessary promotional language.
+==================================================
+FIELD OF INVENTION
+==================================================
 
-Follow the supplied Rule 13 guidance regarding title
-length and abstract requirements.
+Describe the technical field using information already present in the
+original document.
 
-============================================================
+==================================================
 BACKGROUND
-============================================================
+==================================================
 
-Improve the background by organizing information already
-present in the original document.
+Improve clarity and patent style.
 
-Do not invent:
+Do not invent prior-art documents, publications, dates, products or
+technical disadvantages.
 
-- prior-art documents;
-- patent numbers;
-- publications;
-- dates;
-- competitors;
-- technical disadvantages;
-- market facts.
+Do not make unsupported statements that something is "known", "widely
+used", "conventional" or "prior art".
 
-If the original contains unsupported assertions, preserve
-their substance cautiously or flag them for review.
-
-============================================================
+==================================================
 OBJECTS
-============================================================
+==================================================
 
-Extract and organize objects that are actually disclosed.
+Objects must be derived from the original disclosure.
 
-Do not invent new objectives merely because they would
-make the specification appear stronger.
+Do not add an advantage merely because it would normally appear in a
+patent specification.
 
-============================================================
+==================================================
 SUMMARY
-============================================================
+==================================================
 
-The summary must accurately reflect the disclosed invention.
+Summarize the disclosed invention.
 
-Do not introduce technical features that appear only in
-the claims unless those features are supported elsewhere
-in the original specification.
+Do not expand its scope.
 
-============================================================
+==================================================
 DETAILED DESCRIPTION
-============================================================
+==================================================
+
+Preserve the technical disclosure.
 
 Improve:
 
-- logical order;
 - terminology;
-- component relationships;
-- operation sequence;
-- embodiment organization;
-- reference numeral consistency.
+- sequence;
+- references;
+- clarity;
+- consistency;
+- relationship between components;
+- explanation of operation.
 
-Do not add technical information.
+Do not create missing technical details.
 
-If the description does not sufficiently support a claim,
-DO NOT invent supporting disclosure.
-
-Instead flag:
-
-"[SUPPORT GAP — HUMAN REVIEW REQUIRED]"
-
-============================================================
+==================================================
 CLAIMS
-============================================================
+==================================================
 
-Claims are critical.
+Claims require special caution.
 
-Improve claims only using matter already disclosed.
+Do not add technical limitations that were absent from the original
+claims/specification.
+
+Do not broaden claims merely to make them appear stronger.
 
 Check:
 
-- claim numbering;
-- independent/dependent structure;
-- dependency;
+- independent/dependent relationship;
 - antecedent basis;
 - clarity;
-- succinctness;
-- consistency with description;
-- unnecessary repetition;
-- terminology consistency;
-- scope consistency.
+- consistency;
+- unnecessary duplication;
+- claim numbering;
+- support in the specification.
 
-Do NOT broaden claims by adding undisclosed features.
+If a claim appears unsupported or potentially problematic, retain the
+safest supported formulation and flag it for human review.
 
-Do NOT narrow claims by adding new technical limitations.
-
-Do NOT create a technical feature merely because it could
-potentially improve patentability.
-
-If a claim cannot safely be improved:
-
-preserve the original claim and flag it.
-
-============================================================
+==================================================
 ABSTRACT
-============================================================
+==================================================
 
-Prepare a concise abstract based only on disclosed matter.
+Prepare a concise abstract based only on disclosed material.
 
-The abstract should:
+Do not introduce new technical information.
 
-- identify the technical field;
-- summarize the invention;
-- identify technical advancement where supported;
-- identify principal use where supported;
-- remain consistent with the specification;
-- avoid speculative use;
-- use applicable reference signs where appropriate.
+Follow the applicable Indian patent requirements supplied in the context.
 
-Keep the proposed abstract at or below 150 words.
+==================================================
+NEW MATTER
+==================================================
 
-============================================================
-REFERENCE NUMERALS
-============================================================
+Before finalizing the answer, internally compare the proposed revision
+with the original text.
 
-Preserve existing reference numerals.
+If there is uncertainty whether something constitutes new matter:
 
-Do not invent new reference numerals unless the original
-document clearly establishes the corresponding feature.
+1. DO NOT confidently add it.
+2. Prefer the original disclosure.
+3. Flag the issue for HUMAN REVIEW.
 
-If reference numerals are inconsistent:
-
-flag the inconsistency for human review.
-
-============================================================
-HUMAN REVIEW FLAGS
-============================================================
-
-Use a human-review flag whenever:
-
-- technical support is insufficient;
-- a claim appears broader than the description;
-- a proposed change could introduce new matter;
-- a section cannot be reconstructed safely;
-- a reference numeral is ambiguous;
-- the original disclosure is internally inconsistent;
-- the legal significance cannot be determined reliably.
-
-============================================================
-ORIGINAL PATENT DOCUMENT
-============================================================
-
-{original_text}
-
-============================================================
-APPLICATION ANALYSIS AND SOURCE CONTEXT
-============================================================
-
-{analysis_context}
-
-============================================================
-OUTPUT FORMAT
-============================================================
+==================================================
+OUTPUT
+==================================================
 
 Return ONLY valid JSON.
 
-Do not use Markdown.
-
-Use exactly this structure:
+Use this structure:
 
 {{
-  "rewrite_status": "completed",
+  "rewrite_status": "COMPLETED",
   "document_type": "{document_type}",
 
-  "revision_summary": {{
-    "overall": "",
-    "changes_made": [],
-    "limitations": []
-  }},
+  "revision_summary": [
+    "..."
+  ],
 
   "new_matter_safeguard": {{
-    "status": "passed",
-    "assessment": "",
-    "potential_new_matter": []
+    "status": "PASS_OR_REVIEW_REQUIRED",
+    "reason": "...",
+    "suspected_new_matter": []
   }},
 
-  "human_review_required": [],
+  "human_review_required": true,
 
   "revised_form2": {{
-    "title": "",
-
-    "field_of_invention": "",
-
-    "background": "",
-
+    "title": "...",
+    "field_of_invention": "...",
+    "background": "...",
     "objects": [],
-
-    "summary": "",
-
-    "brief_description_of_drawings": "",
-
-    "detailed_description": "",
-
+    "summary": "...",
+    "brief_description_of_drawings": "...",
+    "detailed_description": "...",
     "claims": [
       {{
         "claim_number": 1,
-        "claim_text": "",
-        "claim_type": "independent",
-        "status": "revised"
+        "claim_text": "...",
+        "claim_type": "INDEPENDENT",
+        "status": "REVISED"
       }}
     ],
-
-    "abstract": ""
+    "abstract": "..."
   }},
 
-  "section_review": {{
-    "title": {{
-      "status": "",
-      "changes": ""
-    }},
-
-    "field_of_invention": {{
-      "status": "",
-      "changes": ""
-    }},
-
-    "background": {{
-      "status": "",
-      "changes": ""
-    }},
-
-    "objects": {{
-      "status": "",
-      "changes": ""
-    }},
-
-    "summary": {{
-      "status": "",
-      "changes": ""
-    }},
-
-    "brief_description_of_drawings": {{
-      "status": "",
-      "changes": ""
-    }},
-
-    "detailed_description": {{
-      "status": "",
-      "changes": ""
-    }},
-
-    "claims": {{
-      "status": "",
-      "changes": ""
-    }},
-
-    "abstract": {{
-      "status": "",
-      "changes": ""
+  "section_review": [
+    {{
+      "section": "Title",
+      "status": "PASS",
+      "comments": "..."
     }}
-  }},
+  ],
 
   "change_log": [
     {{
-      "section": "",
-      "change_type": "language",
-      "original_issue": "",
-      "change_made": "",
-      "reason": "",
-      "new_matter_risk": "low"
+      "section": "Claims",
+      "change": "...",
+      "reason": "...",
+      "new_matter_risk": "LOW"
     }}
   ],
 
   "compliance_review": {{
-    "section_10_review": "",
-    "section_10_5_claim_review": "",
-    "rule_13_review": "",
-    "section_59_review": ""
+    "form2_structure": "PASS_OR_REVIEW_REQUIRED",
+    "section_10": "PASS_OR_REVIEW_REQUIRED",
+    "section_59": "PASS_OR_REVIEW_REQUIRED",
+    "claims": "PASS_OR_REVIEW_REQUIRED",
+    "abstract": "PASS_OR_REVIEW_REQUIRED"
   }},
 
-  "disclaimer": ""
+  "disclaimer": "..."
 }}
 
-============================================================
-FINAL VALIDATION
-============================================================
+==================================================
+ORIGINAL DOCUMENT
+==================================================
 
-Before returning JSON:
+{original_text}
 
-1. Verify that every technical feature in the revised
-   document is supported by the original document.
+==================================================
+ANALYSIS CONTEXT
+==================================================
 
-2. Verify that no new technical matter was introduced.
+{analysis_context}
 
-3. Verify that claims do not contain unsupported features.
+==================================================
+DOCUMENT TYPE
+==================================================
 
-4. Verify that the abstract is no more than 150 words.
+{document_type}
 
-5. Verify that claim numbering is sequential.
+==================================================
+ANALYSIS LEVEL
+==================================================
 
-6. Verify that dependent claims refer only to appropriate
-   earlier claims.
-
-7. Verify terminology consistency.
-
-8. Verify that reference numerals were not arbitrarily
-   invented.
-
-9. Verify that unsupported sections are marked for
-   human review.
-
-10. Verify that legal requirements are not represented
-    as guaranteed compliance.
-
-11. Verify that Section 59 concerns are explicitly flagged
-    where applicable.
-
-12. Return valid JSON only.
+{analysis_level}
 """
 
-
-# ============================================================
-# FORM 2 REWRITE
-# ============================================================
 
 def rewrite_form2(
     original_text: str,
@@ -610,16 +384,13 @@ def rewrite_form2(
     model: str = DEFAULT_REWRITE_MODEL,
 ) -> Dict[str, Any]:
     """
-    Generate a proposed revised Form 2 Complete Specification.
-
-    The function is deliberately conservative and instructs
-    Gemini not to introduce new technical matter.
+    Generate a proposed revised Form 2 and run a deterministic
+    new-matter screening comparison.
     """
 
     if not original_text or not original_text.strip():
-
         raise ValueError(
-            "Original patent document contains no readable text."
+            "Original Form 2 text is empty."
         )
 
     prompt = build_rewrite_prompt(
@@ -629,30 +400,23 @@ def rewrite_form2(
         analysis_context=analysis_context,
     )
 
-    raw_response = generate_response(
+    response_text = generate_response(
         prompt=prompt,
         api_key=api_key,
         model=model,
     )
 
-    result = parse_json_response(
-        raw_response
-    )
+    result = parse_json_response(response_text)
 
-    # --------------------------------------------------------
-    # Basic structural validation
-    # --------------------------------------------------------
+    # ------------------------------------------------------------
+    # Validate minimum structure
+    # ------------------------------------------------------------
 
     required_fields = [
         "rewrite_status",
-        "revision_summary",
+        "revised_form2",
         "new_matter_safeguard",
         "human_review_required",
-        "revised_form2",
-        "section_review",
-        "change_log",
-        "compliance_review",
-        "disclaimer",
     ]
 
     missing_fields = [
@@ -662,10 +426,9 @@ def rewrite_form2(
     ]
 
     if missing_fields:
-
         raise ValueError(
-            "Form 2 rewrite response is missing required "
-            f"fields: {', '.join(missing_fields)}"
+            "Rewrite response is missing required fields: "
+            + ", ".join(missing_fields)
         )
 
     revised_form2 = result.get(
@@ -673,79 +436,224 @@ def rewrite_form2(
         {},
     )
 
-    if not isinstance(
-        revised_form2,
-        dict,
-    ):
-
+    if not isinstance(revised_form2, dict):
         raise ValueError(
             "revised_form2 must be a JSON object."
         )
 
-    # --------------------------------------------------------
-    # Ensure claims are a list
-    # --------------------------------------------------------
+    # ------------------------------------------------------------
+    # Ensure claims list exists
+    # ------------------------------------------------------------
 
     claims = revised_form2.get(
         "claims",
         [],
     )
 
-    if not isinstance(
-        claims,
-        list,
-    ):
+    if not isinstance(claims, list):
+        claims = []
 
-        revised_form2["claims"] = []
+    revised_form2["claims"] = claims
 
-    # --------------------------------------------------------
-    # Ensure human review list
-    # --------------------------------------------------------
+    # ------------------------------------------------------------
+    # Ensure review/change-log lists exist
+    # ------------------------------------------------------------
 
     if not isinstance(
-        result.get(
-            "human_review_required"
-        ),
+        result.get("section_review"),
         list,
     ):
-
-        result["human_review_required"] = []
-
-    # --------------------------------------------------------
-    # Ensure change log list
-    # --------------------------------------------------------
+        result["section_review"] = []
 
     if not isinstance(
-        result.get(
-            "change_log"
-        ),
+        result.get("change_log"),
         list,
     ):
-
         result["change_log"] = []
 
-    # --------------------------------------------------------
-    # Add system metadata
-    # --------------------------------------------------------
+    if not isinstance(
+        result.get("revision_summary"),
+        list,
+    ):
+        result["revision_summary"] = []
+
+    # ------------------------------------------------------------
+    # Convert revised Form 2 to text
+    # ------------------------------------------------------------
+
+    revised_text = revised_form2_to_text(
+        result
+    )
+
+    # ------------------------------------------------------------
+    # Extract original claims when available
+    # ------------------------------------------------------------
+
+    original_claims = []
+
+    # The analysis context may contain deterministic claim data,
+    # but we intentionally do not rely on it for the legal comparison.
+    # The original text remains the primary source.
+
+    original_claims = extract_claims_from_text(
+        original_text
+    )
+
+    revised_claims = [
+        claim.get("claim_text", "")
+        if isinstance(claim, dict)
+        else str(claim)
+        for claim in claims
+    ]
+
+    # ------------------------------------------------------------
+    # Deterministic Section 59 screening
+    # ------------------------------------------------------------
+
+    new_matter_check = assess_new_matter(
+        original_text=original_text,
+        revised_text=revised_text,
+        original_claims=original_claims,
+        revised_claims=revised_claims,
+    )
+
+    result["new_matter_check"] = new_matter_check
+
+    # ------------------------------------------------------------
+    # Reconcile Gemini and deterministic results
+    # ------------------------------------------------------------
+
+    deterministic_review_required = (
+        new_matter_check.get(
+            "human_review_required",
+            True,
+        )
+    )
+
+    gemini_review_required = bool(
+        result.get(
+            "human_review_required",
+            True,
+        )
+    )
+
+    result["human_review_required"] = (
+        deterministic_review_required
+        or gemini_review_required
+    )
+
+    if deterministic_review_required:
+        result["new_matter_safeguard"][
+            "status"
+        ] = "REVIEW_REQUIRED"
+
+        result["new_matter_safeguard"][
+            "reason"
+        ] = (
+            "Automated comparison detected differences "
+            "requiring human review under the Section 59 "
+            "no-new-matter safeguard."
+        )
+
+    # ------------------------------------------------------------
+    # Metadata
+    # ------------------------------------------------------------
 
     result["rewrite_engine"] = {
         "model": model,
-        "mode": "conservative_no_new_matter",
-        "source": "original_document_plus_supplied_analysis",
+        "analysis_level": analysis_level,
+        "new_matter_checker": True,
+        "section_59_screening": True,
+        "legal_determination": False,
     }
 
     return result
 
 
-# ============================================================
-# CONVERT REVISED FORM 2 TO TEXT
-# ============================================================
+def extract_claims_from_text(
+    text: str,
+) -> List[str]:
+    """
+    Extract a basic claims section from original Form 2 text.
+
+    This is intentionally conservative and is only used for comparison.
+    """
+
+    if not text:
+        return []
+
+    lines = text.splitlines()
+
+    claims_start = None
+
+    for index, line in enumerate(lines):
+        normalized = line.strip().lower()
+
+        if normalized in {
+            "claims",
+            "claims:",
+            "what is claimed is:",
+            "what is claimed:",
+        }:
+            claims_start = index + 1
+            break
+
+        if (
+            "claims" in normalized
+            and len(normalized) < 80
+        ):
+            claims_start = index + 1
+            break
+
+    if claims_start is None:
+        return []
+
+    claim_lines = lines[claims_start:]
+
+    claims = []
+
+    current_claim = []
+
+    for line in claim_lines:
+
+        stripped = line.strip()
+
+        if not stripped:
+            continue
+
+        # Detect numbered claims.
+        if (
+            stripped[:1].isdigit()
+            and (
+                "." in stripped[:4]
+                or ")" in stripped[:4]
+            )
+        ):
+            if current_claim:
+                claims.append(
+                    " ".join(current_claim).strip()
+                )
+
+            current_claim = [
+                stripped
+            ]
+
+        else:
+            current_claim.append(stripped)
+
+    if current_claim:
+        claims.append(
+            " ".join(current_claim).strip()
+        )
+
+    return claims
+
 
 def revised_form2_to_text(
     rewrite_result: Dict[str, Any],
 ) -> str:
     """
-    Convert structured revised Form 2 JSON into readable text.
+    Convert structured rewrite JSON into readable Form 2 text.
     """
 
     form2 = rewrite_result.get(
@@ -755,253 +663,200 @@ def revised_form2_to_text(
 
     sections = []
 
-    # --------------------------------------------------------
-    # Title
-    # --------------------------------------------------------
-
     title = form2.get(
         "title",
         "",
-    )
+    ).strip()
 
     if title:
         sections.append(
-            "TITLE OF THE INVENTION\n\n"
-            + str(title).strip()
+            "TITLE\n"
+            + title
         )
-
-    # --------------------------------------------------------
-    # Field
-    # --------------------------------------------------------
 
     field = form2.get(
         "field_of_invention",
         "",
-    )
+    ).strip()
 
     if field:
         sections.append(
-            "FIELD OF THE INVENTION\n\n"
-            + str(field).strip()
+            "FIELD OF INVENTION\n"
+            + field
         )
-
-    # --------------------------------------------------------
-    # Background
-    # --------------------------------------------------------
 
     background = form2.get(
         "background",
         "",
-    )
+    ).strip()
 
     if background:
         sections.append(
-            "BACKGROUND OF THE INVENTION\n\n"
-            + str(background).strip()
+            "BACKGROUND\n"
+            + background
         )
-
-    # --------------------------------------------------------
-    # Objects
-    # --------------------------------------------------------
 
     objects = form2.get(
         "objects",
         [],
     )
 
-    if objects:
-
-        object_lines = []
-
-        if isinstance(
-            objects,
-            list,
-        ):
-
+    if isinstance(objects, list):
+        object_text = "\n".join(
+            f"{index}. {item}"
             for index, item in enumerate(
                 objects,
                 start=1,
-            ):
-
-                object_lines.append(
-                    f"{index}. {str(item).strip()}"
-                )
-
-        else:
-
-            object_lines.append(
-                str(objects).strip()
             )
-
-        sections.append(
-            "OBJECTS OF THE INVENTION\n\n"
-            + "\n".join(object_lines)
+            if str(item).strip()
         )
+    else:
+        object_text = str(objects)
 
-    # --------------------------------------------------------
-    # Summary
-    # --------------------------------------------------------
+    if object_text.strip():
+        sections.append(
+            "OBJECTS OF THE INVENTION\n"
+            + object_text
+        )
 
     summary = form2.get(
         "summary",
         "",
-    )
+    ).strip()
 
     if summary:
         sections.append(
-            "SUMMARY OF THE INVENTION\n\n"
-            + str(summary).strip()
+            "SUMMARY OF THE INVENTION\n"
+            + summary
         )
-
-    # --------------------------------------------------------
-    # Drawings
-    # --------------------------------------------------------
 
     drawings = form2.get(
         "brief_description_of_drawings",
         "",
-    )
+    ).strip()
 
     if drawings:
         sections.append(
-            "BRIEF DESCRIPTION OF THE DRAWINGS\n\n"
-            + str(drawings).strip()
+            "BRIEF DESCRIPTION OF DRAWINGS\n"
+            + drawings
         )
 
-    # --------------------------------------------------------
-    # Detailed description
-    # --------------------------------------------------------
-
-    description = form2.get(
+    detailed = form2.get(
         "detailed_description",
         "",
-    )
+    ).strip()
 
-    if description:
+    if detailed:
         sections.append(
-            "DETAILED DESCRIPTION OF THE INVENTION\n\n"
-            + str(description).strip()
+            "DETAILED DESCRIPTION\n"
+            + detailed
         )
-
-    # --------------------------------------------------------
-    # Claims
-    # --------------------------------------------------------
 
     claims = form2.get(
         "claims",
         [],
     )
 
-    if claims:
+    claim_texts = []
 
-        claim_lines = []
-
-        for claim in claims:
-
-            if isinstance(
-                claim,
-                dict,
-            ):
-
+    if isinstance(claims, list):
+        for index, claim in enumerate(
+            claims,
+            start=1,
+        ):
+            if isinstance(claim, dict):
                 number = claim.get(
                     "claim_number",
-                    len(claim_lines) + 1,
+                    index,
                 )
 
-                claim_text = claim.get(
+                text = claim.get(
                     "claim_text",
                     "",
                 )
 
-                if claim_text:
-
-                    claim_lines.append(
-                        f"{number}. {str(claim_text).strip()}"
+                if text:
+                    claim_texts.append(
+                        f"{number}. {text}"
                     )
 
-            elif isinstance(
-                claim,
-                str,
-            ):
-
-                claim_lines.append(
-                    claim.strip()
+            elif str(claim).strip():
+                claim_texts.append(
+                    f"{index}. {claim}"
                 )
 
-        if claim_lines:
-
-            sections.append(
-                "CLAIMS\n\n"
-                + "\n".join(claim_lines)
-            )
-
-    # --------------------------------------------------------
-    # Abstract
-    # --------------------------------------------------------
+    if claim_texts:
+        sections.append(
+            "CLAIMS\n"
+            + "\n".join(claim_texts)
+        )
 
     abstract = form2.get(
         "abstract",
         "",
-    )
+    ).strip()
 
     if abstract:
         sections.append(
-            "ABSTRACT\n\n"
-            + str(abstract).strip()
+            "ABSTRACT\n"
+            + abstract
         )
 
-    return "\n\n\n".join(
+    return "\n\n".join(
         sections
-    )
+    ).strip()
 
-
-# ============================================================
-# REWRITE SUMMARY
-# ============================================================
 
 def get_rewrite_summary(
     rewrite_result: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """
-    Return a compact summary suitable for the Streamlit UI.
-    """
+    """Return compact rewrite information for the UI."""
 
-    safeguard = rewrite_result.get(
-        "new_matter_safeguard",
+    new_matter_check = rewrite_result.get(
+        "new_matter_check",
+        {},
+    )
+
+    claim_comparison = new_matter_check.get(
+        "claim_comparison",
         {},
     )
 
     return {
-        "status": rewrite_result.get(
+        "rewrite_status": rewrite_result.get(
             "rewrite_status",
-            "unknown",
+            "UNKNOWN",
         ),
-
-        "new_matter_status": safeguard.get(
-            "status",
-            "unknown",
+        "new_matter_status": new_matter_check.get(
+            "overall_status",
+            "UNKNOWN",
         ),
-
-        "human_review_count": len(
-            rewrite_result.get(
-                "human_review_required",
+        "human_review_required": rewrite_result.get(
+            "human_review_required",
+            True,
+        ),
+        "flag_count": len(
+            new_matter_check.get(
+                "flags",
                 [],
             )
         ),
-
-        "change_count": len(
-            rewrite_result.get(
-                "change_log",
-                [],
-            )
+        "changed_claims": claim_comparison.get(
+            "changed_claim_count",
+            0,
         ),
-
         "revised_claim_count": len(
             rewrite_result.get(
                 "revised_form2",
                 {},
             ).get(
                 "claims",
+                [],
+            )
+        ),
+        "change_count": len(
+            rewrite_result.get(
+                "change_log",
                 [],
             )
         ),
