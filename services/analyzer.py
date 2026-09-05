@@ -49,8 +49,8 @@ def load_json_rules(
     """
     Load rules from a JSON file.
 
-    Supports both:
-        - a direct JSON list
+    Supports:
+        - direct JSON list
         - {"rules": [...]}
     """
 
@@ -262,9 +262,9 @@ def parse_numbered_claims(
     """
     Fallback parser for numbered claims such as:
 
-    1. A system comprising...
-    2. The system of claim 1...
-    3. ...
+        1. A system comprising...
+        2. The system of claim 1...
+        3. ...
     """
 
     if not claim_text:
@@ -782,7 +782,6 @@ def analyze_document(
     # ========================================================
 
     gemini_context = f"""
-
 ============================================================
 DOCUMENT INFORMATION
 ============================================================
@@ -875,12 +874,10 @@ official guidelines.
 
 Relevant Manual Evidence:
 
-{
-    manual_context.get(
-        "context",
-        "No relevant manual guidance was retrieved.",
-    )
-}
+{manual_context.get(
+    "context",
+    "No relevant manual guidance was retrieved.",
+)}
 
 
 ============================================================
@@ -961,7 +958,6 @@ The following is the extracted text of the patent
 document being analyzed:
 
 {text}
-
 """
 
     # ========================================================
