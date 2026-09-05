@@ -1,45 +1,73 @@
 import streamlit as st
 
 from services.analyzer import analyze_document
+from services.document_parser import extract_text_from_file
+from services.form2_rewriter import (
+    rewrite_form2,
+    revised_form2_to_text,
+    get_rewrite_summary,
+)
 from services.report_generator import (
     generate_markdown_report,
     generate_text_report,
 )
 
 
-# ---------------------------------------------------------
+# ============================================================
 # PAGE CONFIGURATION
-# ---------------------------------------------------------
+# ============================================================
 
 st.set_page_config(
     page_title="Indian Patent Draft Analyzer",
-    page_icon="⚖️",
+    page_icon="📜",
     layout="wide",
 )
 
 
-# ---------------------------------------------------------
+# ============================================================
+# SESSION STATE
+# ============================================================
+
+if "analysis_result" not in st.session_state:
+    st.session_state.analysis_result = None
+
+if "uploaded_text" not in st.session_state:
+    st.session_state.uploaded_text = ""
+
+if "uploaded_filename" not in st.session_state:
+    st.session_state.uploaded_filename = ""
+
+if "rewrite_result" not in st.session_state:
+    st.session_state.rewrite_result = None
+
+
+# ============================================================
 # HEADER
-# ---------------------------------------------------------
+# ============================================================
 
-st.title("⚖️ Indian Patent Draft Analyzer")
+st.title("📜 Indian Patent Draft Analyzer")
 
-st.write(
-    "AI-assisted analysis of Indian patent drafts using "
-    "structured Indian Patent Office rules and Gemini."
+st.markdown(
+    """
+Analyze and improve Indian patent documents using:
+
+- Indian Patents Act
+- Patents Rules
+- Form 2 requirements
+- Patent Office Manual guidance
+- Deterministic rule checks
+- Claim analysis
+- Gemini-based drafting analysis
+- Section 59 no-new-matter screening
+"""
 )
 
-st.caption(
-    "Preliminary analysis only — not legal advice and not a substitute "
-    "for review by a registered patent professional."
-)
 
-
-# ---------------------------------------------------------
+# ============================================================
 # SIDEBAR
-# ---------------------------------------------------------
+# ============================================================
 
-st.sidebar.header("Analysis Settings")
+st.sidebar.header("Document Settings")
 
 document_type = st.sidebar.selectbox(
     "Document Type",
@@ -60,193 +88,227 @@ analysis_level = st.sidebar.selectbox(
         "Detailed",
         "Comprehensive",
     ],
-    index=1,
 )
 
-st.sidebar.divider()
+st.sidebar.markdown("---")
 
 st.sidebar.info(
     """
-The analyzer currently focuses on:
-
-• Form 2 structure  
-• Indian patent rules  
-• Claims  
-• Abstract  
-• Reference numerals  
-• Drafting issues  
-• Examination risks
+For Form 2 documents, the analyzer checks structure,
+claims, abstract, support, drafting issues and selected
+Indian patent requirements.
 """
 )
 
 
-# ---------------------------------------------------------
+# ============================================================
 # FILE UPLOAD
-# ---------------------------------------------------------
-
-st.header("Upload Patent Document")
+# ============================================================
 
 uploaded_file = st.file_uploader(
-    "Upload your patent document",
+    "Upload Patent Document",
     type=["pdf", "docx"],
-    help="Upload a PDF or DOCX patent draft.",
 )
 
+if uploaded_file is not None:
 
-# ---------------------------------------------------------
-# DISPLAY FILE INFORMATION
-# ---------------------------------------------------------
+    file_bytes = uploaded_file.getvalue()
 
-if uploaded_file:
-
-    st.success(f"File uploaded: {uploaded_file.name}")
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.metric(
-            "File Name",
+    try:
+        extracted_text = extract_text_from_file(
+            file_bytes,
             uploaded_file.name,
         )
 
-    with col2:
-        st.metric(
-            "File Type",
-            uploaded_file.type,
+        st.session_state.uploaded_text = extracted_text
+        st.session_state.uploaded_filename = uploaded_file.name
+
+        st.success(
+            f"Document loaded: {uploaded_file.name}"
         )
 
-    with col3:
-        st.metric(
-            "File Size",
-            f"{uploaded_file.size / 1024:.1f} KB",
+        with st.expander("Preview Extracted Text"):
+            preview = extracted_text[:10000]
+
+            st.text_area(
+                "Extracted Text",
+                preview,
+                height=300,
+            )
+
+    except Exception as exc:
+        st.error(
+            f"Unable to extract document text: {exc}"
         )
 
-    st.divider()
 
+# ============================================================
+# MAIN ACTIONS
+# ============================================================
 
-# ---------------------------------------------------------
-# ANALYSIS BUTTON
-# ---------------------------------------------------------
+col1, col2 = st.columns(2)
 
-if uploaded_file:
+with col1:
 
-    start_analysis = st.button(
+    analyze_button = st.button(
         "🔍 Start Patent Analysis",
         type="primary",
         use_container_width=True,
     )
 
-    if start_analysis:
+with col2:
 
-        # Store file bytes before running analysis.
-        file_bytes = uploaded_file.getvalue()
+    rewrite_button = st.button(
+        "✍️ Rewrite Form 2",
+        use_container_width=True,
+        disabled=(
+            document_type
+            != "Form 2 Complete Specification"
+            or not st.session_state.uploaded_text
+        ),
+    )
 
-        try:
 
-            with st.spinner(
-                "Analyzing patent document... "
-                "This may take a moment."
-            ):
+# ============================================================
+# ANALYSIS
+# ============================================================
+
+if analyze_button:
+
+    if not st.session_state.uploaded_text:
+        st.warning(
+            "Please upload a PDF or DOCX document first."
+        )
+
+    else:
+
+        with st.spinner(
+            "Analyzing patent document..."
+        ):
+
+            try:
 
                 result = analyze_document(
-                    file_bytes=file_bytes,
-                    filename=uploaded_file.name,
+                    text=st.session_state.uploaded_text,
                     document_type=document_type,
                     analysis_level=analysis_level,
                 )
 
-            # Save result in session state so it remains available
-            # when the user interacts with the dashboard.
-            st.session_state["analysis_result"] = result
-            st.session_state["analysis_filename"] = uploaded_file.name
+                st.session_state.analysis_result = result
 
-            st.success(
-                "Patent analysis completed successfully."
-            )
+                st.success(
+                    "Patent analysis completed successfully."
+                )
 
-        except Exception as exc:
+            except TypeError:
 
-            st.error(
-                "Analysis could not be completed."
-            )
+                # Compatibility fallback for analyzer versions
+                # using slightly different parameter names.
 
-            st.exception(exc)
+                try:
+
+                    result = analyze_document(
+                        st.session_state.uploaded_text,
+                        document_type=document_type,
+                        analysis_level=analysis_level,
+                    )
+
+                    st.session_state.analysis_result = result
+
+                    st.success(
+                        "Patent analysis completed successfully."
+                    )
+
+                except Exception as exc:
+                    st.error(
+                        f"Analysis failed: {exc}"
+                    )
+
+            except Exception as exc:
+
+                st.error(
+                    f"Analysis failed: {exc}"
+                )
 
 
-# ---------------------------------------------------------
-# GET STORED RESULT
-# ---------------------------------------------------------
+# ============================================================
+# FORM 2 REWRITE
+# ============================================================
 
-result = st.session_state.get("analysis_result")
+if rewrite_button:
 
+    if document_type != "Form 2 Complete Specification":
 
-# ---------------------------------------------------------
-# ANALYSIS DASHBOARD
-# ---------------------------------------------------------
+        st.warning(
+            "Rewrite is currently available for "
+            "Form 2 Complete Specification."
+        )
 
-if result:
+    elif not st.session_state.uploaded_text:
 
-    st.divider()
+        st.warning(
+            "Please upload a Form 2 document first."
+        )
 
-    st.header("📊 Patent Analysis Dashboard")
+    else:
 
-    gemini = result.get("gemini_analysis", {})
-    rule_engine = result.get("rule_engine", {})
-    claim_engine = result.get("claim_engine", {})
+        # --------------------------------------------------------
+        # Use previous analysis as additional context
+        # --------------------------------------------------------
 
-    # -----------------------------------------------------
-    # SCORE CARDS
-    # -----------------------------------------------------
+        analysis_context = ""
 
-    scores = gemini.get("scores", {})
+        if st.session_state.analysis_result:
 
-    if scores:
+            try:
+                analysis_context = str(
+                    st.session_state.analysis_result
+                )
 
-        st.subheader("Overall Analysis")
+            except Exception:
+                analysis_context = ""
 
-        score_items = [
-            ("Overall", scores.get("overall")),
-            ("Structure", scores.get("structure")),
-            ("Claims", scores.get("claims")),
-            ("Support", scores.get("support")),
-            ("Clarity", scores.get("clarity")),
-            ("Abstract", scores.get("abstract")),
-        ]
-
-        columns = st.columns(len(score_items))
-
-        for column, (label, score) in zip(
-            columns,
-            score_items,
+        with st.spinner(
+            "Preparing proposed revised Form 2..."
         ):
 
-            with column:
+            try:
 
-                if isinstance(score, (int, float)):
-                    st.metric(
-                        label,
-                        f"{score}/100",
-                    )
-                else:
-                    st.metric(
-                        label,
-                        "N/A",
-                    )
+                result = rewrite_form2(
+                    original_text=(
+                        st.session_state.uploaded_text
+                    ),
+                    analysis_context=analysis_context,
+                    document_type=document_type,
+                    analysis_level=analysis_level,
+                )
 
-    st.divider()
+                st.session_state.rewrite_result = result
 
-    # -----------------------------------------------------
-    # TABS
-    # -----------------------------------------------------
+                st.success(
+                    "Proposed Form 2 rewrite generated."
+                )
 
-    (
-        summary_tab,
-        form2_tab,
-        claims_tab,
-        abstract_tab,
-        issues_tab,
-        report_tab,
-    ) = st.tabs(
+            except Exception as exc:
+
+                st.error(
+                    f"Form 2 rewriting failed: {exc}"
+                )
+
+
+# ============================================================
+# DISPLAY ANALYSIS
+# ============================================================
+
+analysis = st.session_state.analysis_result
+
+if analysis:
+
+    st.markdown("---")
+
+    st.header("Patent Analysis Dashboard")
+
+    tabs = st.tabs(
         [
             "Executive Summary",
             "Form 2",
@@ -257,519 +319,944 @@ if result:
         ]
     )
 
-    # =====================================================
+    # ========================================================
     # EXECUTIVE SUMMARY
-    # =====================================================
+    # ========================================================
 
-    with summary_tab:
+    with tabs[0]:
 
-        assessment = gemini.get(
+        gemini = analysis.get(
+            "gemini_analysis",
+            {},
+        )
+
+        document_assessment = gemini.get(
             "document_assessment",
             {},
         )
 
+        scores = gemini.get(
+            "scores",
+            {},
+        )
+
         st.subheader(
-            assessment.get(
-                "overall_assessment",
-                "Assessment not available.",
-            )
+            "Executive Summary"
         )
 
-        if assessment.get("document_type"):
+        if document_assessment:
+
             st.write(
-                f"**Document Type:** "
-                f"{assessment['document_type']}"
+                document_assessment.get(
+                    "summary",
+                    document_assessment.get(
+                        "overall_assessment",
+                        "No summary available.",
+                    ),
+                )
             )
 
-        if assessment.get("summary"):
-            st.write(
-                assessment["summary"]
-            )
+        score_columns = st.columns(4)
 
-        st.subheader("Document Statistics")
+        score_items = [
+            (
+                "Overall",
+                scores.get(
+                    "overall_score",
+                    "N/A",
+                ),
+            ),
+            (
+                "Compliance",
+                scores.get(
+                    "compliance_score",
+                    "N/A",
+                ),
+            ),
+            (
+                "Claims",
+                scores.get(
+                    "claim_score",
+                    "N/A",
+                ),
+            ),
+            (
+                "Draft Quality",
+                scores.get(
+                    "drafting_quality_score",
+                    "N/A",
+                ),
+            ),
+        ]
 
-        statistics = result.get(
-            "document_statistics",
-            {},
-        )
+        for column, (label, value) in zip(
+            score_columns,
+            score_items,
+        ):
 
-        stat1, stat2, stat3 = st.columns(3)
+            with column:
+                st.metric(
+                    label,
+                    value,
+                )
 
-        with stat1:
-            st.metric(
-                "Words",
-                statistics.get("words", "N/A"),
-            )
 
-        with stat2:
-            st.metric(
-                "Characters",
-                statistics.get("characters", "N/A"),
-            )
-
-        with stat3:
-            st.metric(
-                "Paragraphs",
-                statistics.get("paragraphs", "N/A"),
-            )
-
-    # =====================================================
+    # ========================================================
     # FORM 2
-    # =====================================================
+    # ========================================================
 
-    with form2_tab:
+    with tabs[1]:
 
-        st.subheader("Form 2 Structure")
+        st.subheader(
+            "Form 2 Structure & Compliance"
+        )
 
-        sections = gemini.get(
-            "sections",
+        rule_engine = analysis.get(
+            "rule_engine",
             {},
         )
 
-        if sections:
+        if rule_engine:
 
-            for section_name, section_data in sections.items():
+            col1, col2, col3 = st.columns(3)
 
-                if isinstance(section_data, dict):
+            with col1:
+                st.metric(
+                    "Word Count",
+                    rule_engine.get(
+                        "word_count",
+                        "N/A",
+                    ),
+                )
 
-                    status = section_data.get(
-                        "status",
-                        "Unknown",
-                    )
+            with col2:
+                st.metric(
+                    "Claims",
+                    len(
+                        rule_engine.get(
+                            "claims",
+                            [],
+                        )
+                    ),
+                )
 
-                    assessment_text = section_data.get(
-                        "assessment",
-                        "",
-                    )
+            with col3:
+                st.metric(
+                    "Issues",
+                    len(
+                        rule_engine.get(
+                            "issues",
+                            [],
+                        )
+                    ),
+                )
 
-                    if status.lower() in [
-                        "present",
-                        "complete",
-                        "adequate",
-                        "satisfactory",
-                    ]:
-                        icon = "✅"
-                    elif status.lower() in [
-                        "missing",
-                        "incomplete",
-                        "weak",
-                    ]:
-                        icon = "⚠️"
+            sections = rule_engine.get(
+                "sections",
+                {},
+            )
+
+            if sections:
+
+                st.markdown(
+                    "### Detected Sections"
+                )
+
+                for section, detected in sections.items():
+
+                    if detected:
+                        st.success(
+                            f"✓ {section}"
+                        )
                     else:
-                        icon = "ℹ️"
-
-                    with st.expander(
-                        f"{icon} "
-                        f"{section_name.replace('_', ' ').title()}"
-                    ):
-
-                        st.write(
-                            f"**Status:** {status}"
+                        st.warning(
+                            f"⚠ {section} not detected"
                         )
 
-                        if assessment_text:
-                            st.write(
-                                assessment_text
-                            )
-
-        st.subheader("Deterministic Rule Checks")
-
-        rule_issues = rule_engine.get(
-            "issues",
+        gemini_sections = analysis.get(
+            "gemini_analysis",
+            {},
+        ).get(
+            "sections",
             [],
         )
 
-        if rule_issues:
+        if gemini_sections:
 
-            for issue in rule_issues:
-
-                if isinstance(issue, dict):
-
-                    severity = issue.get(
-                        "severity",
-                        "info",
-                    )
-
-                    message = issue.get(
-                        "message",
-                        issue.get(
-                            "title",
-                            "Issue identified.",
-                        ),
-                    )
-
-                    if severity == "high":
-                        st.error(message)
-
-                    elif severity == "medium":
-                        st.warning(message)
-
-                    else:
-                        st.info(message)
-
-                else:
-                    st.info(str(issue))
-
-        else:
-            st.success(
-                "No deterministic rule issues were identified."
+            st.markdown(
+                "### Gemini Section Review"
             )
 
-    # =====================================================
+            for section in gemini_sections:
+
+                if isinstance(section, dict):
+
+                    with st.expander(
+                        section.get(
+                            "section",
+                            "Section",
+                        )
+                    ):
+
+                        st.write(
+                            section.get(
+                                "assessment",
+                                section.get(
+                                    "comments",
+                                    "",
+                                ),
+                            )
+                        )
+
+
+    # ========================================================
     # CLAIMS
-    # =====================================================
+    # ========================================================
 
-    with claims_tab:
+    with tabs[2]:
 
-        st.subheader("Claim Analysis")
+        st.subheader(
+            "Claim Analysis"
+        )
 
-        claims = gemini.get(
+        claim_engine = analysis.get(
+            "claim_engine",
+            {},
+        )
+
+        claims = claim_engine.get(
             "claims",
             [],
         )
 
-        if not claims:
-
-            st.warning(
-                "No structured claim analysis was returned."
-            )
-
-        else:
+        if claims:
 
             for claim in claims:
 
-                claim_number = claim.get(
-                    "claim_number",
-                    "?",
-                )
+                if isinstance(claim, dict):
 
-                claim_type = claim.get(
-                    "claim_type",
-                    "unknown",
-                )
+                    number = claim.get(
+                        "claim_number",
+                        "?",
+                    )
 
-                with st.expander(
-                    f"Claim {claim_number} — "
-                    f"{claim_type.title()}"
-                ):
+                    claim_type = claim.get(
+                        "claim_type",
+                        "",
+                    )
 
-                    if claim.get("category"):
+                    with st.expander(
+                        f"Claim {number} — {claim_type}"
+                    ):
+
                         st.write(
-                            f"**Category:** "
-                            f"{claim['category']}"
+                            claim.get(
+                                "claim_text",
+                                claim.get(
+                                    "text",
+                                    "",
+                                ),
+                            )
                         )
 
-                    if claim.get("assessment"):
-                        st.write(
-                            claim["assessment"]
-                        )
+                        if claim.get(
+                            "issues"
+                        ):
 
-                    if claim.get("issues"):
-
-                        st.write("**Issues:**")
-
-                        for issue in claim["issues"]:
-                            st.warning(
-                                str(issue)
+                            st.markdown(
+                                "**Issues:**"
                             )
 
-                    if claim.get("recommendations"):
+                            for issue in claim[
+                                "issues"
+                            ]:
+                                st.warning(
+                                    str(issue)
+                                )
 
-                        st.write(
-                            "**Recommendations:**"
-                        )
+                else:
+                    st.write(str(claim))
 
-                        for recommendation in claim[
-                            "recommendations"
-                        ]:
-                            st.info(
-                                str(recommendation)
-                            )
-
-        st.subheader(
-            "Deterministic Claim Analysis"
-        )
-
-        claim_count = claim_engine.get(
-            "claim_count",
-            0,
-        )
-
-        independent_count = len(
-            claim_engine.get(
-                "independent_claims",
-                [],
-            )
-        )
-
-        dependent_count = len(
-            claim_engine.get(
-                "dependent_claims",
-                [],
-            )
-        )
-
-        c1, c2, c3 = st.columns(3)
-
-        with c1:
-            st.metric(
-                "Total Claims",
-                claim_count,
+        else:
+            st.info(
+                "No claim analysis available."
             )
 
-        with c2:
-            st.metric(
-                "Independent Claims",
-                independent_count,
-            )
 
-        with c3:
-            st.metric(
-                "Dependent Claims",
-                dependent_count,
-            )
-
-    # =====================================================
+    # ========================================================
     # ABSTRACT
-    # =====================================================
+    # ========================================================
 
-    with abstract_tab:
+    with tabs[3]:
 
         st.subheader(
             "Abstract Analysis"
         )
 
-        abstract = gemini.get(
+        abstract_analysis = analysis.get(
+            "gemini_analysis",
+            {},
+        ).get(
             "abstract_analysis",
             {},
         )
 
-        if abstract.get("assessment"):
-            st.write(
-                abstract["assessment"]
+        if abstract_analysis:
+
+            st.json(
+                abstract_analysis
             )
 
-        if abstract.get("word_count") is not None:
-            st.metric(
-                "Abstract Word Count",
-                abstract["word_count"],
+        else:
+
+            rule_abstract = analysis.get(
+                "rule_engine",
+                {},
+            ).get(
+                "abstract",
+                "",
             )
 
-        if abstract.get("issues"):
-
-            st.write("### Issues")
-
-            for issue in abstract["issues"]:
-                st.warning(
-                    str(issue)
+            if rule_abstract:
+                st.text_area(
+                    "Extracted Abstract",
+                    rule_abstract,
+                    height=250,
                 )
 
-        if abstract.get("recommendations"):
-
-            st.write(
-                "### Recommendations"
-            )
-
-            for recommendation in abstract[
-                "recommendations"
-            ]:
+            else:
                 st.info(
-                    str(recommendation)
+                    "No abstract analysis available."
                 )
 
-    # =====================================================
-    # ISSUES
-    # =====================================================
 
-    with issues_tab:
+    # ========================================================
+    # ISSUES
+    # ========================================================
+
+    with tabs[4]:
 
         st.subheader(
             "Potential Issues"
         )
 
-        issues = gemini.get(
+        gemini_issues = analysis.get(
+            "gemini_analysis",
+            {},
+        ).get(
             "issues",
             [],
         )
 
-        if not issues:
+        rule_issues = analysis.get(
+            "rule_engine",
+            {},
+        ).get(
+            "issues",
+            [],
+        )
+
+        all_issues = []
+
+        if rule_issues:
+            all_issues.extend(
+                [
+                    {
+                        "source": "Rule Engine",
+                        "issue": issue,
+                    }
+                    for issue in rule_issues
+                ]
+            )
+
+        if gemini_issues:
+            all_issues.extend(
+                [
+                    {
+                        "source": "Gemini",
+                        "issue": issue,
+                    }
+                    for issue in gemini_issues
+                ]
+            )
+
+        if not all_issues:
 
             st.success(
-                "No potential issues were returned."
+                "No potential issues were identified."
             )
 
         else:
 
-            for index, issue in enumerate(
-                issues,
-                start=1,
-            ):
+            for item in all_issues:
 
-                if isinstance(issue, str):
+                issue = item["issue"]
 
-                    st.warning(
-                        f"{index}. {issue}"
+                if isinstance(issue, dict):
+
+                    severity = issue.get(
+                        "severity",
+                        "REVIEW",
                     )
 
-                    continue
-
-                title = issue.get(
-                    "title",
-                    f"Issue {index}",
-                )
-
-                severity = issue.get(
-                    "severity",
-                    "info",
-                ).lower()
-
-                issue_type = issue.get(
-                    "type",
-                    "DRAFTING_SUGGESTION",
-                )
-
-                confidence = issue.get(
-                    "confidence",
-                    "unknown",
-                )
-
-                if severity == "critical":
-                    st.error(
-                        f"🔴 {title}"
+                    title = issue.get(
+                        "title",
+                        issue.get(
+                            "issue",
+                            "Potential Issue",
+                        ),
                     )
 
-                elif severity == "high":
-                    st.error(
-                        f"🟠 {title}"
-                    )
+                    with st.expander(
+                        f"{severity}: {title}"
+                    ):
 
-                elif severity == "medium":
-                    st.warning(
-                        f"🟡 {title}"
-                    )
+                        st.write(
+                            issue.get(
+                                "description",
+                                issue.get(
+                                    "message",
+                                    "",
+                                ),
+                            )
+                        )
+
+                        if issue.get("recommendation"):
+
+                            st.markdown(
+                                "**Recommendation:**"
+                            )
+
+                            st.write(
+                                issue[
+                                    "recommendation"
+                                ]
+                            )
 
                 else:
-                    st.info(
-                        f"🟢 {title}"
+
+                    st.warning(
+                        str(issue)
                     )
 
-                st.caption(
-                    f"Type: {issue_type} | "
-                    f"Confidence: {confidence}"
-                )
 
-                if issue.get("evidence"):
-                    st.write(
-                        f"**Evidence:** "
-                        f"{issue['evidence']}"
-                    )
-
-                if issue.get("explanation"):
-                    st.write(
-                        f"**Explanation:** "
-                        f"{issue['explanation']}"
-                    )
-
-                if issue.get("recommendation"):
-                    st.write(
-                        f"**Recommended Action:** "
-                        f"{issue['recommendation']}"
-                    )
-
-                if issue.get("source"):
-                    st.caption(
-                        f"Source: {issue['source']}"
-                    )
-
-                st.divider()
-
-    # =====================================================
+    # ========================================================
     # REPORT
-    # =====================================================
+    # ========================================================
 
-    with report_tab:
+    with tabs[5]:
 
         st.subheader(
             "Analysis Report"
         )
 
-        report = generate_markdown_report(
-            analysis={
-                **gemini,
-                "document_statistics": result.get(
-                    "document_statistics",
-                    {},
-                ),
-            },
-            document_name=result.get(
-                "document_name",
-                "Patent Document",
-            ),
+        document_name = (
+            st.session_state.uploaded_filename
+            or "patent_document"
         )
 
-        st.markdown(report)
+        markdown_report = (
+            generate_markdown_report(
+                analysis,
+                document_name,
+            )
+        )
 
-        st.divider()
+        text_report = (
+            generate_text_report(
+                analysis,
+                document_name,
+            )
+        )
 
         st.download_button(
-            label="⬇️ Download Markdown Report",
-            data=report,
+            "⬇️ Download Markdown Report",
+            markdown_report,
             file_name="patent_analysis_report.md",
             mime="text/markdown",
-            use_container_width=True,
-        )
-
-        text_report = generate_text_report(
-            analysis=gemini,
-            document_name=result.get(
-                "document_name",
-                "Patent Document",
-            ),
         )
 
         st.download_button(
-            label="⬇️ Download Text Report",
-            data=text_report,
+            "⬇️ Download Text Report",
+            text_report,
             file_name="patent_analysis_report.txt",
             mime="text/plain",
-            use_container_width=True,
+        )
+
+        with st.expander(
+            "Preview Report"
+        ):
+
+            st.markdown(
+                markdown_report
+            )
+
+
+# ============================================================
+# REWRITE RESULTS
+# ============================================================
+
+rewrite = st.session_state.rewrite_result
+
+if rewrite:
+
+    st.markdown("---")
+
+    st.header(
+        "✍️ Proposed Revised Form 2"
+    )
+
+    st.warning(
+        """
+        This is a proposed drafting revision, not an automatically
+        legally valid amendment. Review the changes against the
+        originally filed disclosure and applicable Indian patent law
+        before using it for prosecution.
+        """
+    )
+
+    summary = get_rewrite_summary(
+        rewrite
+    )
+
+    # --------------------------------------------------------
+    # Summary metrics
+    # --------------------------------------------------------
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric(
+            "Rewrite Status",
+            summary["rewrite_status"],
+        )
+
+    with col2:
+        st.metric(
+            "Changed Claims",
+            summary["changed_claims"],
+        )
+
+    with col3:
+        st.metric(
+            "New-Matter Flags",
+            summary["flag_count"],
+        )
+
+    with col4:
+        st.metric(
+            "Human Review",
+            "REQUIRED"
+            if summary["human_review_required"]
+            else "NOT FLAGGED",
+        )
+
+    # --------------------------------------------------------
+    # New matter result
+    # --------------------------------------------------------
+
+    new_matter = rewrite.get(
+        "new_matter_check",
+        {},
+    )
+
+    st.markdown(
+        "### Section 59 New-Matter Screening"
+    )
+
+    status = new_matter.get(
+        "overall_status",
+        "UNKNOWN",
+    )
+
+    if status == "NO_OBVIOUS_NEW_MATTER_SIGNAL":
+
+        st.success(
+            "No obvious new-matter signal was detected "
+            "by the automated comparison."
+        )
+
+    else:
+
+        st.error(
+            "Human review is required: the automated comparison "
+            "detected differences requiring review."
+        )
+
+    st.caption(
+        "This comparison is a screening tool and does not "
+        "make a legal determination under Section 59."
+    )
+
+    flags = new_matter.get(
+        "flags",
+        [],
+    )
+
+    if flags:
+
+        st.markdown(
+            "#### Review Flags"
+        )
+
+        for flag in flags:
+
+            with st.expander(
+                flag.get(
+                    "type",
+                    "Review Flag",
+                )
+            ):
+
+                st.write(
+                    flag.get(
+                        "message",
+                        "",
+                    )
+                )
+
+                if flag.get("items"):
+
+                    st.write(
+                        flag["items"]
+                    )
+
+                if flag.get("claims"):
+
+                    st.json(
+                        flag["claims"]
+                    )
+
+
+    # --------------------------------------------------------
+    # Revision summary
+    # --------------------------------------------------------
+
+    revision_summary = rewrite.get(
+        "revision_summary",
+        [],
+    )
+
+    if revision_summary:
+
+        st.markdown(
+            "### Revision Summary"
+        )
+
+        for item in revision_summary:
+            st.write(
+                f"• {item}"
+            )
+
+
+    # --------------------------------------------------------
+    # Original vs Revised
+    # --------------------------------------------------------
+
+    st.markdown(
+        "### Original vs Revised"
+    )
+
+    original_text = (
+        st.session_state.uploaded_text
+    )
+
+    revised_text = revised_form2_to_text(
+        rewrite
+    )
+
+    original_col, revised_col = st.columns(2)
+
+    with original_col:
+
+        st.markdown(
+            "#### Original Form 2"
+        )
+
+        st.text_area(
+            "Original",
+            original_text,
+            height=700,
+            label_visibility="collapsed",
+        )
+
+    with revised_col:
+
+        st.markdown(
+            "#### Proposed Revised Form 2"
+        )
+
+        st.text_area(
+            "Revised",
+            revised_text,
+            height=700,
+            label_visibility="collapsed",
         )
 
 
-else:
+    # --------------------------------------------------------
+    # Revised sections
+    # --------------------------------------------------------
 
-    # -----------------------------------------------------
-    # INITIAL EMPTY STATE
-    # -----------------------------------------------------
-
-    st.info(
-        "Upload a PDF or DOCX patent document and click "
-        "**Start Patent Analysis** to begin."
+    revised_form2 = rewrite.get(
+        "revised_form2",
+        {},
     )
 
-    st.subheader("Analysis Pipeline")
+    st.markdown(
+        "### Revised Form 2 Sections"
+    )
 
-    pipeline_columns = st.columns(5)
-
-    pipeline_steps = [
-        ("1", "Document", "Extract patent text"),
-        ("2", "Rules", "Check IPO requirements"),
-        ("3", "Claims", "Analyze claim structure"),
-        ("4", "Gemini", "Perform AI analysis"),
-        ("5", "Report", "Generate report"),
+    section_labels = [
+        (
+            "Title",
+            "title",
+        ),
+        (
+            "Field of Invention",
+            "field_of_invention",
+        ),
+        (
+            "Background",
+            "background",
+        ),
+        (
+            "Objects of the Invention",
+            "objects",
+        ),
+        (
+            "Summary",
+            "summary",
+        ),
+        (
+            "Brief Description of Drawings",
+            "brief_description_of_drawings",
+        ),
+        (
+            "Detailed Description",
+            "detailed_description",
+        ),
+        (
+            "Abstract",
+            "abstract",
+        ),
     ]
 
-    for column, (number, title, description) in zip(
-        pipeline_columns,
-        pipeline_steps,
-    ):
+    for label, key in section_labels:
 
-        with column:
+        value = revised_form2.get(
+            key,
+            "",
+        )
 
-            st.markdown(
-                f"### {number}. {title}"
+        if isinstance(value, list):
+
+            value = "\n".join(
+                str(item)
+                for item in value
             )
 
-            st.caption(
-                description
-            )
+        if value:
+
+            with st.expander(label):
+
+                st.text_area(
+                    label,
+                    str(value),
+                    height=200,
+                    key=f"rewrite_{key}",
+                )
+
+
+    # --------------------------------------------------------
+    # Claims
+    # --------------------------------------------------------
+
+    revised_claims = revised_form2.get(
+        "claims",
+        [],
+    )
+
+    if revised_claims:
+
+        st.markdown(
+            "### Proposed Revised Claims"
+        )
+
+        for index, claim in enumerate(
+            revised_claims,
+            start=1,
+        ):
+
+            if isinstance(claim, dict):
+
+                claim_number = claim.get(
+                    "claim_number",
+                    index,
+                )
+
+                claim_text = claim.get(
+                    "claim_text",
+                    "",
+                )
+
+                claim_type = claim.get(
+                    "claim_type",
+                    "",
+                )
+
+                claim_status = claim.get(
+                    "status",
+                    "",
+                )
+
+            else:
+
+                claim_number = index
+                claim_text = str(claim)
+                claim_type = ""
+                claim_status = ""
+
+            with st.expander(
+                f"Claim {claim_number}"
+            ):
+
+                if claim_type:
+                    st.caption(
+                        f"Type: {claim_type}"
+                    )
+
+                if claim_status:
+                    st.caption(
+                        f"Status: {claim_status}"
+                    )
+
+                st.text_area(
+                    f"Claim {claim_number}",
+                    claim_text,
+                    height=180,
+                    key=f"revised_claim_{claim_number}",
+                )
+
+
+    # --------------------------------------------------------
+    # Change Log
+    # --------------------------------------------------------
+
+    change_log = rewrite.get(
+        "change_log",
+        [],
+    )
+
+    if change_log:
+
+        st.markdown(
+            "### Change Log"
+        )
+
+        for change in change_log:
+
+            if isinstance(change, dict):
+
+                section = change.get(
+                    "section",
+                    "Section",
+                )
+
+                reason = change.get(
+                    "reason",
+                    "",
+                )
+
+                risk = change.get(
+                    "new_matter_risk",
+                    "REVIEW",
+                )
+
+                with st.expander(
+                    f"{section} — {risk}"
+                ):
+
+                    st.write(
+                        change.get(
+                            "change",
+                            "",
+                        )
+                    )
+
+                    if reason:
+                        st.caption(
+                            f"Reason: {reason}"
+                        )
+
+            else:
+
+                st.write(
+                    str(change)
+                )
+
+
+    # --------------------------------------------------------
+    # Compliance Review
+    # --------------------------------------------------------
+
+    compliance = rewrite.get(
+        "compliance_review",
+        {},
+    )
+
+    if compliance:
+
+        st.markdown(
+            "### Compliance Review"
+        )
+
+        st.json(
+            compliance
+        )
+
+
+    # --------------------------------------------------------
+    # Download revised Form 2
+    # --------------------------------------------------------
+
+    st.markdown(
+        "### Export Proposed Revision"
+    )
+
+    st.download_button(
+        "⬇️ Download Revised Form 2",
+        revised_text,
+        file_name="proposed_revised_form2.txt",
+        mime="text/plain",
+    )
+
+    revised_markdown = (
+        "# Proposed Revised Form 2\n\n"
+        + revised_text
+        + "\n\n---\n\n"
+        + "This document is a proposed drafting revision "
+        "and requires human patent-professional review."
+    )
+
+    st.download_button(
+        "⬇️ Download Revised Form 2 Markdown",
+        revised_markdown,
+        file_name="proposed_revised_form2.md",
+        mime="text/markdown",
+    )
+
+
+# ============================================================
+# FOOTER
+# ============================================================
+
+st.markdown("---")
+
+st.caption(
+    """
+Indian Patent Draft Analyzer — Drafting assistance only.
+Automated analysis does not constitute legal advice, a patentability
+opinion, or a determination by the Indian Patent Office.
+"""
+)
