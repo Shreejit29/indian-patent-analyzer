@@ -2,25 +2,56 @@ import json
 import os
 from typing import Any
 
+import streamlit as st
 from google import genai
 
 
 DEFAULT_MODEL = "gemini-2.5-flash"
 
 
+def get_gemini_api_key(api_key: str | None = None) -> str:
+    """
+    Get Gemini API key.
+
+    Priority:
+    1. Explicitly supplied API key
+    2. Streamlit Secrets
+    3. Environment variable
+    """
+
+    if api_key:
+        return api_key
+
+    # Streamlit Secrets
+    try:
+        secret_key = st.secrets.get("GEMINI_API_KEY")
+
+        if secret_key:
+            return secret_key
+    except Exception:
+        # st.secrets may not be configured during some
+        # local execution scenarios.
+        pass
+
+    # Environment variable
+    environment_key = os.getenv("GEMINI_API_KEY")
+
+    if environment_key:
+        return environment_key
+
+    raise ValueError(
+        "Gemini API key not found. "
+        "Add GEMINI_API_KEY to Streamlit Secrets "
+        "or configure it as an environment variable."
+    )
+
+
 def get_gemini_client(api_key: str | None = None):
     """Create and return a Gemini API client."""
 
-    if api_key is None:
-        api_key = os.getenv("GEMINI_API_KEY")
+    key = get_gemini_api_key(api_key)
 
-    if not api_key:
-        raise ValueError(
-            "Gemini API key not found. Configure GEMINI_API_KEY "
-            "in Streamlit Secrets."
-        )
-
-    return genai.Client(api_key=api_key)
+    return genai.Client(api_key=key)
 
 
 def generate_response(
@@ -39,7 +70,9 @@ def generate_response(
         )
 
         if not response.text:
-            raise ValueError("Gemini returned an empty response.")
+            raise ValueError(
+                "Gemini returned an empty response."
+            )
 
         return response.text.strip()
 
@@ -68,17 +101,18 @@ def clean_json_response(response_text: str) -> str:
     return text.strip()
 
 
-def parse_json_response(response_text: str) -> dict[str, Any]:
+def parse_json_response(
+    response_text: str,
+) -> dict[str, Any]:
     """
     Parse Gemini response as JSON.
-
-    Raises a clear error if Gemini returns invalid JSON.
     """
 
     cleaned = clean_json_response(response_text)
 
     try:
         result = json.loads(cleaned)
+
     except json.JSONDecodeError as exc:
         raise ValueError(
             "Gemini returned invalid JSON. "
@@ -112,16 +146,18 @@ def analyze_patent_text(
 You are the AI analysis engine for an Indian Patent Draft Analyzer.
 
 Your task is to analyze the supplied patent document using:
+
 1. The actual patent document.
 2. The verified Indian patent rule information supplied below.
-3. Careful drafting analysis.
+3. Careful patent drafting analysis.
 
 ANALYSIS LEVEL:
 {analysis_level}
 
 IMPORTANT LEGAL SAFETY RULES:
 
-- Do not invent Indian patent laws, sections, rules, forms, or guidelines.
+- Do not invent Indian patent laws, sections, rules, forms,
+  or guidelines.
 - Do not fabricate citations.
 - Do not say that a patent will definitely be granted or rejected.
 - Clearly distinguish formal/legal requirements from drafting suggestions.
@@ -140,8 +176,8 @@ EXAMINATION_RISK:
 A potential issue that may attract examination attention.
 
 DRAFTING_SUGGESTION:
-An improvement that may improve clarity, consistency, completeness,
-or readability but is not necessarily a legal requirement.
+An improvement that may improve clarity, consistency,
+completeness, or readability but is not necessarily a legal requirement.
 
 SOURCE CONFIDENCE:
 
@@ -158,7 +194,7 @@ Return ONLY valid JSON.
 Do not use Markdown.
 Do not put the JSON inside a code block.
 
-The JSON must follow this structure:
+Use this structure:
 
 {{
   "document_assessment": {{
