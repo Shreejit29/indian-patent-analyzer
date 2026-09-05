@@ -1,0 +1,795 @@
+{
+  "metadata": {
+    "name": "Indian Patent Rules Database",
+    "country": "India",
+    "jurisdiction": "Indian Patent Office",
+    "purpose": "Preliminary AI-assisted patent draft analysis",
+    "version": "2026.1",
+    "authority": "Indian Patent Office",
+    "important_note": "Legal provisions must be verified against the latest Gazette and official IP India sources before making filing or prosecution decisions."
+  },
+
+  "rules": [
+
+    {
+      "id": "PATENT-001",
+      "provision": "Section 3",
+      "category": "patentability",
+      "title": "Non-patentable inventions",
+      "requirement": "The claimed subject matter should be screened for exclusions from patentability under Section 3 of the Patents Act.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-002",
+      "provision": "Section 3(a)",
+      "category": "patentability",
+      "title": "Frivolous or contrary to natural laws",
+      "requirement": "The invention should not be frivolous or obviously contrary to well established natural laws.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-003",
+      "provision": "Section 3(b)",
+      "category": "patentability",
+      "title": "Public order and morality",
+      "requirement": "Subject matter should be screened for exclusion where its primary or intended use or commercial exploitation would be contrary to public order or morality or harmful to specified protected interests.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-004",
+      "provision": "Section 3(c)",
+      "category": "patentability",
+      "title": "Mere discovery",
+      "requirement": "A mere discovery of a scientific principle or formulation of an abstract theory or discovery of a living or non-living substance occurring in nature is excluded.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-005",
+      "provision": "Section 3(d)",
+      "category": "patentability",
+      "title": "New form of known substance",
+      "requirement": "For relevant pharmaceutical or chemical subject matter, the claim should be screened against the requirements and exclusions relating to new forms of known substances and enhanced efficacy.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-006",
+      "provision": "Section 3(e)",
+      "category": "patentability",
+      "title": "Mere admixture",
+      "requirement": "A mere admixture resulting only in aggregation of properties of components should be screened for exclusion under Section 3(e).",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-007",
+      "provision": "Section 3(f)",
+      "category": "patentability",
+      "title": "Mere arrangement or duplication",
+      "requirement": "A mere arrangement or re-arrangement or duplication of known devices functioning independently should be screened under Section 3(f).",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-008",
+      "provision": "Section 3(g)",
+      "category": "patentability",
+      "title": "Traditional subject matter",
+      "requirement": "Subject matter falling within the specified exclusion relating to methods of agriculture or horticulture should be screened accordingly.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-009",
+      "provision": "Section 3(h)",
+      "category": "patentability",
+      "title": "Methods of treatment",
+      "requirement": "Methods of medicinal, surgical, curative, prophylactic, diagnostic or therapeutic treatment of humans or animals should be screened against the exclusion under Section 3(h).",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-010",
+      "provision": "Section 3(i)",
+      "category": "patentability",
+      "title": "Treatment methods",
+      "requirement": "Claims directed to treatment of humans or animals should be specifically screened for statutory exclusion.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-011",
+      "provision": "Section 3(j)",
+      "category": "patentability",
+      "title": "Plants and animals",
+      "requirement": "Plants and animals in whole or part, seeds, varieties and species and essentially biological processes for production or propagation should be screened against the applicable exclusion.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-012",
+      "provision": "Section 3(k)",
+      "category": "computer_related",
+      "title": "Computer programme per se",
+      "requirement": "Computer programme per se and mathematical methods should be screened against the applicable exclusions. Computer-related inventions require careful assessment of the claimed subject matter.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-013",
+      "provision": "Section 3(l)",
+      "category": "literary",
+      "title": "Literary, dramatic, musical or artistic work",
+      "requirement": "Literary, dramatic, musical or artistic works and certain other aesthetic creations should be screened for statutory exclusion.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-014",
+      "provision": "Section 3(m)",
+      "category": "business_method",
+      "title": "Scheme or rule or method of performing mental act",
+      "requirement": "Schemes, rules or methods for performing mental acts and related excluded subject matter should be screened.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-015",
+      "provision": "Section 3(n)",
+      "category": "presentation",
+      "title": "Presentation of information",
+      "requirement": "A mere presentation of information should be screened for the applicable statutory exclusion.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-016",
+      "provision": "Section 3(o)",
+      "category": "topography",
+      "title": "Topography of integrated circuits",
+      "requirement": "Topography of integrated circuits should be screened against the relevant exclusion.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-017",
+      "provision": "Section 3(p)",
+      "category": "traditional_knowledge",
+      "title": "Traditional knowledge",
+      "requirement": "An invention which is in effect traditional knowledge or which aggregates or duplicates known properties of traditionally known components should be screened for exclusion.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-3"
+    },
+
+    {
+      "id": "PATENT-018",
+      "provision": "Section 4",
+      "category": "national_security",
+      "title": "Atomic energy",
+      "requirement": "Inventions relating to atomic energy should be screened for the statutory prohibition and applicable restrictions.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970"
+    },
+
+    {
+      "id": "PATENT-019",
+      "provision": "Section 8",
+      "category": "foreign_applications",
+      "title": "Information regarding foreign applications",
+      "requirement": "Where applicable, applicants are required to provide information concerning corresponding foreign applications in accordance with Section 8 and the applicable Rules.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-8"
+    },
+
+    {
+      "id": "PATENT-020",
+      "provision": "Rule 12",
+      "category": "foreign_applications",
+      "title": "Statement and undertaking regarding foreign applications",
+      "requirement": "Information and undertaking relating to foreign applications must be handled in accordance with the applicable Rule 12 requirements and Form 3 procedure.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003/rule-12"
+    },
+
+    {
+      "id": "PATENT-021",
+      "provision": "Section 9",
+      "category": "specification",
+      "title": "Provisional and complete specification",
+      "requirement": "Where a provisional specification is filed, the complete specification must subsequently comply with the applicable statutory requirements and prescribed time limits.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-9"
+    },
+
+    {
+      "id": "PATENT-022",
+      "provision": "Section 10(1)",
+      "category": "specification",
+      "title": "Title and description",
+      "requirement": "Every specification shall describe the invention and begin with a title sufficiently indicating the subject matter to which the invention relates.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-10"
+    },
+
+    {
+      "id": "PATENT-023",
+      "provision": "Section 10(4)(a)",
+      "category": "specification",
+      "title": "Full and particular description",
+      "requirement": "A complete specification shall fully and particularly describe the invention, its operation or use and the method by which it is to be performed.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-10"
+    },
+
+    {
+      "id": "PATENT-024",
+      "provision": "Section 10(4)(b)",
+      "category": "specification",
+      "title": "Best method",
+      "requirement": "The complete specification shall disclose the best method of performing the invention which is known to the applicant and for which protection is claimed.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-10"
+    },
+
+    {
+      "id": "PATENT-025",
+      "provision": "Section 10(4)(c)",
+      "category": "claims",
+      "title": "Claims define scope",
+      "requirement": "The complete specification shall end with one or more claims defining the scope of the invention for which protection is claimed.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-10"
+    },
+
+    {
+      "id": "PATENT-026",
+      "provision": "Section 10(5)",
+      "category": "claims",
+      "title": "Single invention or linked group",
+      "requirement": "Claims should relate to a single invention or to a group of inventions linked so as to form a single inventive concept.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-10"
+    },
+
+    {
+      "id": "PATENT-027",
+      "provision": "Section 10(5)",
+      "category": "claims",
+      "title": "Claims clear and succinct",
+      "requirement": "Claims should be clear and succinct and should be fairly based on the matter disclosed in the specification.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-10"
+    },
+
+    {
+      "id": "PATENT-028",
+      "provision": "Section 10(4)(d)",
+      "category": "abstract",
+      "title": "Abstract",
+      "requirement": "The complete specification shall be accompanied by an abstract of the invention.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-10"
+    },
+
+    {
+      "id": "PATENT-029",
+      "provision": "Rule 13(1)",
+      "category": "formality",
+      "title": "Specification in Form 2",
+      "requirement": "Every provisional or complete specification shall be made in Form 2.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003/rule-13"
+    },
+
+    {
+      "id": "PATENT-030",
+      "provision": "Rule 13(4)",
+      "category": "drawings",
+      "title": "Drawings and reference signs",
+      "requirement": "Where drawings are necessary for explanation of the invention, they should comply with Rule 15 and be referred to in detail in the specification; relevant features in drawings should use reference signs where applicable.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003/rule-13"
+    },
+
+    {
+      "id": "PATENT-031",
+      "provision": "Rule 13(5)",
+      "category": "drafting",
+      "title": "Irrelevant matter",
+      "requirement": "Irrelevant or unnecessary matter should be excluded from the title, description, claims and drawings.",
+      "analysis_type": "DRAFTING_SUGGESTION",
+      "severity": "medium",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003/rule-13"
+    },
+
+    {
+      "id": "PATENT-032",
+      "provision": "Rule 13(7)",
+      "category": "abstract",
+      "title": "Abstract requirements",
+      "requirement": "The abstract should provide a concise summary of the matter contained in the specification, including the technical field, technical advancement if any, and principal use or uses.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003/rule-13"
+    },
+
+    {
+      "id": "PATENT-033",
+      "provision": "Rule 13(7)(c)",
+      "category": "abstract",
+      "title": "Abstract word limit",
+      "requirement": "The abstract should not contain more than 150 words.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003/rule-13"
+    },
+
+    {
+      "id": "PATENT-034",
+      "provision": "Rule 13(7)(e)",
+      "category": "abstract",
+      "title": "Abstract as search instrument",
+      "requirement": "The abstract should be drafted so that it can serve as an efficient instrument for searching the particular art.",
+      "analysis_type": "DRAFTING_SUGGESTION",
+      "severity": "medium",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003/rule-13"
+    },
+
+    {
+      "id": "PATENT-035",
+      "provision": "Rule 15",
+      "category": "drawings",
+      "title": "Drawing format",
+      "requirement": "Drawings supplied with specifications should comply with the applicable Rule 15 requirements, including prescribed sheet format, margins, numbering and presentation requirements.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003/rule-15"
+    },
+
+    {
+      "id": "PATENT-036",
+      "provision": "Rule 15(4)",
+      "category": "drawings",
+      "title": "A4 drawing sheets",
+      "requirement": "Drawings should be prepared on standard A4 size sheets with the prescribed clear margins.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "medium",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003/rule-15"
+    },
+
+    {
+      "id": "PATENT-037",
+      "provision": "Rule 15(5)",
+      "category": "drawings",
+      "title": "Drawing scale",
+      "requirement": "Drawings should be on a scale sufficiently large to show the invention clearly and dimensions should not be marked on the drawings.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "medium",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003/rule-15"
+    },
+
+    {
+      "id": "PATENT-038",
+      "provision": "Rule 15(6)",
+      "category": "drawings",
+      "title": "Drawing identification",
+      "requirement": "Drawings should be sequentially or systematically numbered and carry the prescribed applicant, sheet and signature information.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "medium",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003/rule-15"
+    },
+
+    {
+      "id": "PATENT-039",
+      "provision": "Rule 24B",
+      "category": "examination",
+      "title": "Request for examination",
+      "requirement": "A request for examination must be filed within the applicable period prescribed under Rule 24B, subject to transitional provisions and the date of filing.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003/rule-24b"
+    },
+
+    {
+      "id": "PATENT-040",
+      "provision": "Rule 24B(1)",
+      "category": "examination",
+      "title": "Current examination period",
+      "requirement": "For applications governed by the current rule, the request for examination is generally subject to the thirty-one-month period specified in Rule 24B, with transitional provisions for older applications.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003/rule-24b"
+    },
+
+    {
+      "id": "PATENT-041",
+      "provision": "Rule 24C",
+      "category": "examination",
+      "title": "Expedited examination",
+      "requirement": "Where expedited examination is sought, the applicant must satisfy the applicable eligibility and procedural requirements under Rule 24C.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003/rule-24c"
+    },
+
+    {
+      "id": "PATENT-042",
+      "provision": "Section 11A",
+      "category": "publication",
+      "title": "Publication of application",
+      "requirement": "Patent applications are subject to the publication provisions of Section 11A, subject to applicable exceptions and procedures.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "medium",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-11a"
+    },
+
+    {
+      "id": "PATENT-043",
+      "provision": "Section 11B",
+      "category": "examination",
+      "title": "Request for examination",
+      "requirement": "An application is not examined unless the prescribed request for examination is made in accordance with Section 11B and the applicable Rules.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-11b"
+    },
+
+    {
+      "id": "PATENT-044",
+      "provision": "Section 13",
+      "category": "prior_art",
+      "title": "Search for anticipation",
+      "requirement": "Examination includes consideration of whether the invention is anticipated by prior publication or prior claiming in accordance with the Act.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-13"
+    },
+
+    {
+      "id": "PATENT-045",
+      "provision": "Section 14",
+      "category": "examination",
+      "title": "Consideration of examiner report",
+      "requirement": "The Controller considers the examiner's report and applicable objections during examination proceedings.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-14"
+    },
+
+    {
+      "id": "PATENT-046",
+      "provision": "Section 15",
+      "category": "examination",
+      "title": "Power of Controller",
+      "requirement": "The Controller may refuse or require amendment of an application or specification where the statutory requirements are not met, subject to the Act and Rules.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-15"
+    },
+
+    {
+      "id": "PATENT-047",
+      "provision": "Section 16",
+      "category": "divisional",
+      "title": "Divisional applications",
+      "requirement": "Where multiple inventions are disclosed in an application, the applicability of divisional filing under Section 16 may need consideration.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-16"
+    },
+
+    {
+      "id": "PATENT-048",
+      "provision": "Rule 13(2A)",
+      "category": "divisional",
+      "title": "Further applications",
+      "requirement": "The 2024 amendment introduced Rule 13(2A), permitting an applicant, if desired, to file one or more further applications under Section 16 in the circumstances specified.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "medium",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003/rule-13"
+    },
+
+    {
+      "id": "PATENT-049",
+      "provision": "Section 57",
+      "category": "amendment",
+      "title": "Amendment of application and specification",
+      "requirement": "Amendments to applications or specifications must comply with the statutory requirements governing amendment.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-57"
+    },
+
+    {
+      "id": "PATENT-050",
+      "provision": "Section 59",
+      "category": "amendment",
+      "title": "Limitations on amendment",
+      "requirement": "Amendments to a specification should remain within the statutory limits and should not introduce matter beyond the original disclosure.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-act-1970/section-59"
+    },
+
+    {
+      "id": "PATENT-051",
+      "provision": "Section 3(k) and CRI Guidelines",
+      "category": "computer_related",
+      "title": "Computer-related inventions",
+      "requirement": "Computer-related inventions should be analyzed against the applicable statutory exclusion and the current official CRI examination guidelines. The analysis should focus on the substance and technical contribution rather than merely the wording of the claim.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/resource/patents-resources-guidelines"
+    },
+
+    {
+      "id": "PATENT-052",
+      "provision": "Section 3 and official guidelines",
+      "category": "subject_matter",
+      "title": "Excluded subject matter screening",
+      "requirement": "The analyzer should identify claim features that may correspond to statutory exclusions, but should not automatically conclude that an invention is excluded without sufficient technical and legal context.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/resource/patents-resources-guidelines"
+    },
+
+    {
+      "id": "PATENT-053",
+      "provision": "Rule 28A",
+      "category": "examination",
+      "title": "Anticipation procedure",
+      "requirement": "Potential anticipation issues should be considered in accordance with the applicable procedure under Rule 28A.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003"
+    },
+
+    {
+      "id": "PATENT-054",
+      "provision": "Rule 29",
+      "category": "prior_claiming",
+      "title": "Anticipation by prior claiming",
+      "requirement": "Potential anticipation by prior claiming should be considered in accordance with Rule 29.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003"
+    },
+
+    {
+      "id": "PATENT-055",
+      "provision": "Rule 29A",
+      "category": "grace_period",
+      "title": "Grace period",
+      "requirement": "Where relevant, the analyzer should identify whether the facts potentially require consideration of the statutory grace-period provisions under Rule 29A.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "medium",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003"
+    },
+
+    {
+      "id": "PATENT-056",
+      "provision": "Rule 30",
+      "category": "anticipation",
+      "title": "Amendment in anticipation cases",
+      "requirement": "Where anticipation issues arise, amendments to the complete specification are subject to the applicable procedure under Rule 30.",
+      "analysis_type": "EXAMINATION_RISK",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003"
+    },
+
+    {
+      "id": "PATENT-057",
+      "provision": "Rule 138",
+      "category": "procedural",
+      "title": "Extension and condonation of delay",
+      "requirement": "Where an applicant seeks extension of time or condonation of delay, the applicable requirements of Rule 138 and its exclusions should be checked.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/acts/patent-rules-2003"
+    },
+
+    {
+      "id": "PATENT-058",
+      "provision": "2024 Amendments",
+      "category": "amendments",
+      "title": "2024 amendments",
+      "requirement": "The analyzer should account for applicable amendments introduced by the Patents (Amendment) Rules, 2024 and Patents (Second Amendment) Rules, 2024, while recognizing transitional provisions.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/resource/patents-resources-rules"
+    },
+
+    {
+      "id": "PATENT-059",
+      "provision": "Rule 12 as amended in 2024",
+      "category": "foreign_applications",
+      "title": "Updated foreign application information",
+      "requirement": "The 2024 amendments modified Rule 12 procedures relating to information concerning applications filed outside India, including specified timelines and Form 4 requests for applicable extensions or condonation.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "high",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/writereaddata/Portal/IPORule/1_83_1_Patent_Amendment_Rule_2024_Gazette_Copy.pdf"
+    },
+
+    {
+      "id": "PATENT-060",
+      "provision": "Rule 24B as amended in 2024",
+      "category": "examination",
+      "title": "Updated request-for-examination period",
+      "requirement": "The 2024 amendment changed the applicable request-for-examination period to thirty-one months for applications governed by the amended provision, while preserving transitional treatment for certain earlier applications.",
+      "analysis_type": "LEGAL_FORMAL_REQUIREMENT",
+      "severity": "critical",
+      "source_status": "CURRENT",
+      "authority": "Indian Patent Office",
+      "source_reference": "https://ipindia.gov.in/writereaddata/Portal/IPORule/1_83_1_Patent_Amendment_Rule_2024_Gazette_Copy.pdf"
+    }
+
+  ]
+}
