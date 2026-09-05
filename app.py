@@ -13,6 +13,62 @@ from services.report_generator import (
 )
 import google.genai
 
+st.sidebar.markdown("### Gemini Diagnostics")
+
+st.sidebar.write(
+    "SDK version:",
+    google.genai.__version__,
+)
+
+api_key = str(
+    st.secrets.get(
+        "GEMINI_API_KEY",
+        "",
+    )
+).strip()
+
+st.sidebar.write(
+    "Key detected:",
+    bool(api_key),
+)
+
+st.sidebar.write(
+    "Key prefix:",
+    api_key[:3] if api_key else "NONE",
+)
+
+if st.sidebar.button("Test Gemini Connection"):
+
+    try:
+
+        client = google.genai.Client(
+            api_key=api_key
+        )
+
+        response = client.models.generate_content(
+            model="gemini-3.7-flash",
+            contents="Reply with exactly: GEMINI_OK",
+        )
+
+        st.sidebar.success(
+            "Gemini connection successful"
+        )
+
+        st.sidebar.write(
+            response.text
+        )
+
+    except Exception as exc:
+
+        st.sidebar.error(
+            "Gemini connection failed"
+        )
+
+        st.sidebar.code(
+            str(exc)
+        )
+import google.genai
+
 st.sidebar.write(
     "google-genai version:",
     google.genai.__version__,
