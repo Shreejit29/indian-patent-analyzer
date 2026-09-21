@@ -1,4 +1,4 @@
-streamlit
+streamlit>=1.45
 google-genai>=2.22.0
-pypdf
-python-docx
+pypdf>=5.0
+python-docx>=1.1
