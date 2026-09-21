@@ -1,539 +1,134 @@
+from __future__ import annotations
+
 import re
 from typing import Any
 
 
-# ---------------------------------------------------------
-# BASIC TEXT UTILITIES
-# ---------------------------------------------------------
+ANALYZER_VERSION = "3.0.0"
+_STOPWORDS = {"the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "by", "from", "as", "at", "is", "are", "was", "were", "configured", "wherein", "comprising", "including", "said", "such"}
+_GENERIC = {"method", "system", "device", "apparatus", "step", "first", "second", "third", "one", "more", "claim", "claims", "component", "element"}
 
 def normalize_claim_text(text: str) -> str:
-    """Normalize whitespace in a claim."""
+    return re.sub(r"\s+", " ", text or "").strip()
 
-    if not text:
-        return ""
+def extract_claim_dependencies(claim_text: str) -> list[int]:
+    text = normalize_claim_text(claim_text)
+    if not text: return []
+    patterns = [
+        r"\bclaims?\s+([0-9\s,;\-]+)",
+        r"\b(?:claim|claims)\s+(?:number\s+)?([0-9\s,;\-]+)",
+    ]
+    found = set()
+    for pat in patterns:
+        for m in re.finditer(pat, text, re.I):
+            for n in re.findall(r"\d+", m.group(1)):
+                found.add(int(n))
+    return sorted(found)
 
-    return re.sub(
-        r"\s+",
-        " ",
-        text
-    ).strip()
+def identify_claim_type(claim_text: str) -> str:
+    return "dependent" if extract_claim_dependencies(claim_text) else "independent"
 
-
-# ---------------------------------------------------------
-# CLAIM DEPENDENCY
-# ---------------------------------------------------------
-
-def extract_claim_dependencies(
-    claim_text: str
-) -> list[int]:
-    """
-    Identify claims referenced by a dependent claim.
-
-    Examples:
-        "The apparatus of claim 1..."
-        "The method as claimed in claims 1 or 2..."
-    """
-
-    if not claim_text:
-        return []
-
-    pattern = re.compile(
-        r"\bclaims?\s+"
-        r"((?:\d+\s*(?:,|and|or)?\s*)+)",
-        flags=re.IGNORECASE
-    )
-
-    dependencies = []
-
-    for match in pattern.finditer(
-        claim_text
-    ):
-
-        numbers = re.findall(
-            r"\d+",
-            match.group(1)
-        )
-
-        for number in numbers:
-
-            number_int = int(number)
-
-            if number_int not in dependencies:
-                dependencies.append(
-                    number_int
-                )
-
-    return sorted(
-        dependencies
-    )
-
-
-# ---------------------------------------------------------
-# CLAIM TYPE
-# ---------------------------------------------------------
-
-def identify_claim_type(
-    claim_text: str
-) -> str:
-    """
-    Classify a claim as independent or dependent.
-
-    This is a preliminary rule-based classification.
-    """
-
-    dependencies = extract_claim_dependencies(
-        claim_text
-    )
-
-    if dependencies:
-        return "dependent"
-
-    return "independent"
-
-
-# ---------------------------------------------------------
-# CLAIM OPENING
-# ---------------------------------------------------------
-
-def identify_claim_category(
-    claim_text: str
-) -> str:
-    """
-    Identify the likely category of a claim.
-
-    This is only a preliminary classification.
-    """
-
-    text = claim_text.lower()
-
-    if re.search(
-        r"\bcomputer[- ]implemented\b",
-        text
-    ):
-        return "computer-implemented"
-
-    if re.search(
-        r"\bmethod\b|\bprocess\b",
-        text
-    ):
-        return "method/process"
-
-    if re.search(
-        r"\bsystem\b|\bapparatus\b|\bdevice\b",
-        text
-    ):
-        return "apparatus/system/device"
-
-    if re.search(
-        r"\bcomposition\b|\bformulation\b",
-        text
-    ):
-        return "composition/formulation"
-
-    if re.search(
-        r"\bkit\b",
-        text
-    ):
-        return "kit"
-
+def identify_claim_category(claim_text: str) -> str:
+    text = normalize_claim_text(claim_text).lower()
+    if re.search(r"\b(computer[- ]implemented|software|processor|machine learning|algorithm)\b", text): return "computer-implemented"
+    if re.search(r"\b(method|process|step of)\b", text): return "method/process"
+    if re.search(r"\b(system|apparatus|device|assembly|module)\b", text): return "apparatus/system/device"
+    if re.search(r"\b(composition|formulation|mixture)\b", text): return "composition/formulation"
+    if re.search(r"\b(kit|set)\b", text): return "kit"
     return "other"
 
+def _split_limitations(text: str) -> list[str]:
+    text = normalize_claim_text(text)
+    if not text: return []
+    # Preserve useful technical chunks while avoiding destructive sentence splitting.
+    parts = re.split(r";\s*|\bwherein\b|\bconfigured to\b|\bcomprising\b", text, flags=re.I)
+    out=[]
+    for p in parts:
+        p=re.sub(r"^(and|or)\s+", "", p.strip(), flags=re.I)
+        if len(p) >= 8: out.append(p)
+    return out
 
-# ---------------------------------------------------------
-# ELEMENT EXTRACTION
-# ---------------------------------------------------------
+def extract_claim_elements(claim_text: str) -> list[str]:
+    text = normalize_claim_text(claim_text)
+    if not text: return []
+    candidates=[]
+    # Technical noun phrases after articles, plus explicit functional phrases.
+    for m in re.finditer(r"\b(?:a|an|the|said)\s+([A-Za-z][A-Za-z0-9_/-]*(?:\s+[A-Za-z][A-Za-z0-9_/-]*){0,5})", text, re.I):
+        phrase=m.group(1).strip(" ,.;:")
+        words=phrase.split()
+        while words and words[-1].lower() in _STOPWORDS: words.pop()
+        phrase=" ".join(words)
+        if phrase and phrase.lower() not in _GENERIC and len(phrase)>2: candidates.append(phrase)
+    for part in _split_limitations(text):
+        if any(k in part.lower() for k in ("configured to", "adapted to", "responsive to", "coupled to", "coupled with", "based on")):
+            candidates.append(part)
+    seen=set(); out=[]
+    for x in candidates:
+        k=re.sub(r"[^a-z0-9]+"," ",x.lower()).strip()
+        if k and k not in seen:
+            seen.add(k); out.append(x)
+    return out[:75]
 
-def extract_claim_elements(
-    claim_text: str
-) -> list[str]:
-    """
-    Extract likely technical elements from a claim.
+def extract_limitation_records(claim_text: str) -> list[dict[str, Any]]:
+    text=normalize_claim_text(claim_text)
+    if not text: return []
+    records=[]
+    for idx, part in enumerate(_split_limitations(text), 1):
+        low=part.lower()
+        kind="technical_element"
+        if any(x in low for x in ("configured to", "adapted to", "operable to", "responsive to")): kind="functional"
+        elif any(x in low for x in ("coupled", "connected", "between", "relative to")): kind="relationship"
+        elif re.search(r"\bwherein\b|\bcomprising\b", low): kind="constraint"
+        records.append({"id": f"L{idx}", "text": part, "type": kind, "search_terms": _keywords(part)})
+    return records[:50]
 
-    This is intentionally conservative.
-    Gemini will perform the deeper semantic analysis later.
-    """
+def _keywords(text: str) -> list[str]:
+    words=re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", text.lower())
+    out=[]
+    for w in words:
+        if w not in _STOPWORDS and w not in _GENERIC and w not in out: out.append(w)
+    return out[:12]
 
-    if not claim_text:
-        return []
-
-    text = normalize_claim_text(
-        claim_text
-    )
-
-    elements = []
-
-    # Common structural connectors
-    patterns = [
-        r"\ba\s+([A-Za-z][A-Za-z0-9_-]{2,50})",
-        r"\ban\s+([A-Za-z][A-Za-z0-9_-]{2,50})",
-        r"\bthe\s+([A-Za-z][A-Za-z0-9_-]{2,50})"
-    ]
-
-    for pattern in patterns:
-
-        matches = re.findall(
-            pattern,
-            text,
-            flags=re.IGNORECASE
-        )
-
-        for match in matches:
-
-            cleaned = match.strip(
-                " ,.;:"
-            )
-
-            if (
-                len(cleaned) > 2
-                and cleaned.lower()
-                not in {
-                    "method",
-                    "system",
-                    "device",
-                    "apparatus",
-                    "step",
-                    "first",
-                    "second",
-                    "third"
-                }
-            ):
-
-                if cleaned not in elements:
-
-                    elements.append(
-                        cleaned
-                    )
-
-    return elements[:50]
-
-
-# ---------------------------------------------------------
-# ANTECEDENT BASIS
-# ---------------------------------------------------------
-
-def check_antecedent_basis(
-    claim_text: str
-) -> list[dict[str, Any]]:
-    """
-    Identify possible antecedent-basis issues.
-
-    This is a heuristic check and must be reviewed by
-    the semantic AI layer.
-    """
-
-    if not claim_text:
-        return []
-
-    issues = []
-
-    # Capture phrases such as:
-    # "the controller"
-    # "the sensor"
-    # "said controller"
-
-    definite_terms = re.findall(
-        r"\b(?:the|said)\s+"
-        r"([A-Za-z][A-Za-z0-9_-]{2,50})",
-        claim_text,
-        flags=re.IGNORECASE
-    )
-
-    indefinite_terms = re.findall(
-        r"\b(?:a|an)\s+"
-        r"([A-Za-z][A-Za-z0-9_-]{2,50})",
-        claim_text,
-        flags=re.IGNORECASE
-    )
-
-    introduced = {
-        term.lower()
-        for term in indefinite_terms
-    }
-
-    checked = set()
-
-    for term in definite_terms:
-
-        term_lower = term.lower()
-
-        if term_lower in checked:
-            continue
-
-        checked.add(
-            term_lower
-        )
-
-        # Ignore common non-component words
-        if term_lower in {
-            "method",
-            "system",
-            "apparatus",
-            "device",
-            "step",
-            "first",
-            "second",
-            "third",
-            "one",
-            "more",
-            "response",
-            "accordance"
-        }:
-            continue
-
-        if term_lower not in introduced:
-
-            issues.append(
-                {
-                    "type": "possible_antecedent_basis",
-                    "term": term,
-                    "finding": (
-                        f'The term "{term}" is used with '
-                        "definite wording but no clear "
-                        "earlier indefinite introduction "
-                        "was detected by the rule-based check."
-                    ),
-                    "severity": "MEDIUM"
-                }
-            )
-
+def check_antecedent_basis(claim_text: str) -> list[dict[str, Any]]:
+    text=normalize_claim_text(claim_text)
+    introduced={x.lower() for x in re.findall(r"\b(?:a|an)\s+([A-Za-z][A-Za-z0-9_-]{2,50})", text, re.I)}
+    issues=[]; seen=set()
+    for term in re.findall(r"\b(?:the|said)\s+([A-Za-z][A-Za-z0-9_-]{2,50})", text, re.I):
+        t=term.lower()
+        if t in seen or t in _GENERIC: continue
+        seen.add(t)
+        if t not in introduced:
+            issues.append({"type":"possible_antecedent_basis","term":term,"finding":f'The term "{term}" is used with definite wording but no earlier indefinite introduction was detected by this heuristic.',"severity":"MEDIUM"})
     return issues
 
-
-# ---------------------------------------------------------
-# DEPENDENCY VALIDATION
-# ---------------------------------------------------------
-
-def validate_claim_dependencies(
-    claims: list[dict]
-) -> list[dict[str, Any]]:
-    """
-    Check whether dependent claims reference claims
-    that actually exist and precede them.
-    """
-
-    issues = []
-
-    claim_numbers = {
-        claim["number"]
-        for claim in claims
-    }
-
-    for claim in claims:
-
-        number = claim["number"]
-
-        dependencies = extract_claim_dependencies(
-            claim["text"]
-        )
-
-        if not dependencies:
-            continue
-
-        for dependency in dependencies:
-
-            if dependency not in claim_numbers:
-
-                issues.append(
-                    {
-                        "claim": number,
-                        "type": "missing_parent_claim",
-                        "finding": (
-                            f"Claim {number} refers to "
-                            f"claim {dependency}, but "
-                            "that claim was not detected "
-                            "in the document."
-                        ),
-                        "severity": "HIGH"
-                    }
-                )
-
-            elif dependency >= number:
-
-                issues.append(
-                    {
-                        "claim": number,
-                        "type": "claim_dependency_order",
-                        "finding": (
-                            f"Claim {number} appears to "
-                            f"refer to claim {dependency}, "
-                            "which does not precede it."
-                        ),
-                        "severity": "HIGH"
-                    }
-                )
-
+def validate_claim_dependencies(claims: list[dict]) -> list[dict[str, Any]]:
+    issues=[]; nums={c.get("number") for c in claims if c.get("number") is not None}
+    for c in claims:
+        n=c.get("number"); deps=extract_claim_dependencies(c.get("text", ""))
+        for d in deps:
+            if d not in nums: issues.append({"claim":n,"type":"missing_parent_claim","finding":f"Claim {n} refers to claim {d}, but that claim was not detected.","severity":"HIGH"})
+            elif n is not None and d >= n: issues.append({"claim":n,"type":"claim_dependency_order","finding":f"Claim {n} refers to claim {d}, which does not precede it.","severity":"HIGH"})
     return issues
 
+def analyze_single_claim(claim: dict) -> dict[str, Any]:
+    text=normalize_claim_text(claim.get("text", "")); deps=extract_claim_dependencies(text); lim=extract_limitation_records(text)
+    return {"claim_number":claim.get("number"),"claim_type":identify_claim_type(text),"category":identify_claim_category(text),"text":text,"dependencies":deps,"elements":extract_claim_elements(text),"limitations":lim,"limitation_count":len(lim),"antecedent_issues":check_antecedent_basis(text)}
 
-# ---------------------------------------------------------
-# CLAIM-BY-CLAIM ANALYSIS
-# ---------------------------------------------------------
-
-def analyze_single_claim(
-    claim: dict
-) -> dict[str, Any]:
-    """
-    Prepare structured information for one claim.
-    """
-
-    claim_number = claim.get(
-        "number"
-    )
-
-    claim_text = normalize_claim_text(
-        claim.get("text", "")
-    )
-
-    claim_type = identify_claim_type(
-        claim_text
-    )
-
-    category = identify_claim_category(
-        claim_text
-    )
-
-    dependencies = extract_claim_dependencies(
-        claim_text
-    )
-
-    elements = extract_claim_elements(
-        claim_text
-    )
-
-    antecedent_issues = check_antecedent_basis(
-        claim_text
-    )
-
-    return {
-        "claim_number": claim_number,
-        "claim_type": claim_type,
-        "category": category,
-        "text": claim_text,
-        "dependencies": dependencies,
-        "elements": elements,
-        "antecedent_issues": antecedent_issues
-    }
-
-
-# ---------------------------------------------------------
-# COMPLETE CLAIM ANALYSIS
-# ---------------------------------------------------------
-
-def analyze_claims(
-    claims: list[dict]
-) -> dict[str, Any]:
-    """
-    Analyze all claims in a patent draft.
-    """
-
+def analyze_claims(claims: list[dict]) -> dict[str, Any]:
     if not claims:
+        return {"claims":[],"issues":[{"type":"claims_not_detected","finding":"No claims were detected in the uploaded document.","severity":"CRITICAL"}],"statistics":{"total":0,"independent":0,"dependent":0,"limitations":0,"average_limitations":0}}
+    analyzed=[analyze_single_claim(c) for c in claims]
+    issues=validate_claim_dependencies(claims)
+    for c in analyzed:
+        issues.extend({"claim":c["claim_number"], **i} for i in c["antecedent_issues"])
+    indep=sum(c["claim_type"]=="independent" for c in analyzed); dep=len(analyzed)-indep; lim=sum(c["limitation_count"] for c in analyzed)
+    return {"claims":analyzed,"issues":issues,"statistics":{"total":len(analyzed),"independent":indep,"dependent":dep,"limitations":lim,"average_limitations":round(lim/len(analyzed),2)}}
 
-        return {
-            "claims": [],
-            "issues": [
-                {
-                    "type": "claims_not_detected",
-                    "finding": (
-                        "No claims were detected in "
-                        "the uploaded document."
-                    ),
-                    "severity": "CRITICAL"
-                }
-            ],
-            "statistics": {
-                "total": 0,
-                "independent": 0,
-                "dependent": 0
-            }
-        }
-
-    analyzed_claims = []
-
-    for claim in claims:
-
-        analyzed_claims.append(
-            analyze_single_claim(
-                claim
-            )
-        )
-
-    dependency_issues = (
-        validate_claim_dependencies(
-            claims
-        )
-    )
-
-    antecedent_issues = []
-
-    for claim in analyzed_claims:
-
-        for issue in claim[
-            "antecedent_issues"
-        ]:
-
-            antecedent_issues.append(
-                {
-                    "claim": claim[
-                        "claim_number"
-                    ],
-                    **issue
-                }
-            )
-
-    independent_count = sum(
-        1
-        for claim in analyzed_claims
-        if claim["claim_type"]
-        == "independent"
-    )
-
-    dependent_count = sum(
-        1
-        for claim in analyzed_claims
-        if claim["claim_type"]
-        == "dependent"
-    )
-
-    return {
-        "claims": analyzed_claims,
-
-        "issues": (
-            dependency_issues
-            + antecedent_issues
-        ),
-
-        "statistics": {
-            "total": len(
-                analyzed_claims
-            ),
-            "independent": independent_count,
-            "dependent": dependent_count
-        }
-    }
-
-
-# ---------------------------------------------------------
-# CLAIM-SPECIFICATION SUPPORT PREPARATION
-# ---------------------------------------------------------
-
-def prepare_support_search(
-    analyzed_claim: dict
-) -> list[str]:
-    """
-    Return important claim terms that should be searched
-    in the specification.
-
-    The actual semantic support determination will be
-    performed later using Gemini.
-    """
-
-    elements = analyzed_claim.get(
-        "elements",
-        []
-    )
-
-    return [
-        element
-        for element in elements
-        if len(element) >= 3
-    ]
+def prepare_support_search(analyzed_claim: dict) -> list[str]:
+    terms=list(analyzed_claim.get("elements", []))
+    for lim in analyzed_claim.get("limitations", []): terms.extend(lim.get("search_terms", []))
+    seen=set(); out=[]
+    for t in terms:
+        k=t.lower().strip()
+        if k and k not in seen: seen.add(k); out.append(t)
+    return out[:100]
