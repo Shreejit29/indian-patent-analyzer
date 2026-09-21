@@ -2,37 +2,10 @@
 Indian Patent Analyzer
 V3 Integration Test Dashboard
 
-Purpose
--------
-This application is currently being used to test the V3 backend
-architecture before adding further production modules.
+The Streamlit UI talks only to:
+    services.integration_adapter
 
-Pipeline:
-
-PDF
- ↓
-Document Parser
- ↓
-Claims / Limitations
- ↓
-Rule Engine
- ↓
-Section 3 Screening
- ↓
-Prior-Art Planning
- ↓
-Novelty Screening
- ↓
-Inventive-Step Screening
- ↓
-Prosecution Analysis
- ↓
-Knowledge Graph
- ↓
-Validation
-
-Run:
-    streamlit run app.py
+The adapter handles differences between individual backend modules.
 """
 
 from __future__ import annotations
@@ -40,13 +13,13 @@ from __future__ import annotations
 import json
 import traceback
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import streamlit as st
 
 
 # ============================================================
-# APPLICATION CONFIGURATION
+# CONFIGURATION
 # ============================================================
 
 APP_VERSION = "3.0.0"
@@ -71,7 +44,7 @@ MODULES = [
 
 
 # ============================================================
-# PAGE CONFIGURATION
+# PAGE CONFIG
 # ============================================================
 
 st.set_page_config(
@@ -83,7 +56,7 @@ st.set_page_config(
 
 
 # ============================================================
-# CUSTOM CSS
+# CSS
 # ============================================================
 
 st.markdown(
@@ -102,44 +75,18 @@ st.markdown(
         margin-bottom: 1.5rem;
     }
 
-    .section-title {
-        font-size: 1.35rem;
-        font-weight: 650;
-        margin-top: 1rem;
-        margin-bottom: 0.75rem;
-    }
-
-    .small-muted {
-        color: #6b7280;
-        font-size: 0.82rem;
-    }
-
     .pipeline-box {
         border: 1px solid #e5e7eb;
         border-radius: 12px;
         padding: 1rem;
-        margin-bottom: 1rem;
+        margin: 0.5rem 0;
     }
 
-    .success-box {
-        border-left: 5px solid #16a34a;
-        padding: 0.75rem;
-        border-radius: 8px;
-        background: rgba(22, 163, 74, 0.05);
-    }
-
-    .warning-box {
-        border-left: 5px solid #f59e0b;
-        padding: 0.75rem;
-        border-radius: 8px;
-        background: rgba(245, 158, 11, 0.05);
-    }
-
-    .error-box {
-        border-left: 5px solid #dc2626;
-        padding: 0.75rem;
-        border-radius: 8px;
-        background: rgba(220, 38, 38, 0.05);
+    .stage-card {
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 0.8rem;
+        margin-bottom: 0.5rem;
     }
 
     </style>
@@ -149,24 +96,19 @@ st.markdown(
 
 
 # ============================================================
-# GENERAL HELPERS
+# IMPORT HELPERS
 # ============================================================
 
-def utc_now() -> str:
-    """Return current UTC timestamp."""
-    return datetime.now(timezone.utc).isoformat()
-
-
-def safe_import(module_name: str) -> Dict[str, Any]:
+def safe_import(
+    module_name: str,
+) -> Dict[str, Any]:
     """
-    Import a module safely.
-
-    IMPORTANT:
-    Do not cache imported module objects with st.cache_data.
-    Python module objects are not serializable by Streamlit.
+    Import a backend module without allowing one broken
+    module to crash the application.
     """
 
     try:
+
         module = __import__(
             module_name,
             fromlist=["*"],
@@ -184,17 +126,22 @@ def safe_import(module_name: str) -> Dict[str, Any]:
         return {
             "ok": False,
             "module": None,
-            "error": f"{type(exc).__name__}: {exc}",
+            "error": (
+                f"{type(exc).__name__}: {exc}"
+            ),
             "traceback": traceback.format_exc(),
         }
 
 
 def check_modules() -> Dict[str, Dict[str, Any]]:
     """
-    Check all registered backend modules.
+    Check all backend modules.
 
-    Deliberately NOT cached because the returned objects include
-    Python module objects.
+    IMPORTANT:
+    This function is intentionally NOT cached.
+
+    Streamlit cannot serialize live Python module objects
+    returned by this function.
     """
 
     results = {}
@@ -208,104 +155,65 @@ def check_modules() -> Dict[str, Dict[str, Any]]:
     return results
 
 
-def call_first_available(
-    module: Any,
-    function_names: List[str],
-    *args,
-    **kwargs,
-):
-    """
-    Call the first compatible function available in a module.
-    """
+# ============================================================
+# SERIALIZATION
+# ============================================================
 
-    for function_name in function_names:
-
-        function = getattr(
-            module,
-            function_name,
-            None,
-        )
-
-        if callable(function):
-
-            return function(
-                *args,
-                **kwargs,
-            )
-
-    raise AttributeError(
-        "No compatible function found. "
-        f"Tried: {', '.join(function_names)}"
-    )
-
-
-def normalize_result(value: Any) -> Any:
-    """
-    Convert arbitrary Python results into JSON-friendly structures.
-    """
+def normalize_for_json(
+    value: Any,
+) -> Any:
 
     if value is None:
         return None
 
-    # Custom to_dict()
-    if hasattr(value, "to_dict"):
+    if hasattr(
+        value,
+        "to_dict",
+    ):
 
         try:
-
-            return normalize_result(
+            return normalize_for_json(
                 value.to_dict()
             )
-
         except Exception:
             pass
 
-    # Dataclass
-    if hasattr(value, "__dataclass_fields__"):
+    if hasattr(
+        value,
+        "__dataclass_fields__",
+    ):
 
         try:
 
             from dataclasses import asdict
 
-            return normalize_result(
+            return normalize_for_json(
                 asdict(value)
             )
 
         except Exception:
             pass
 
-    # Dictionary
-    if isinstance(value, dict):
+    if isinstance(
+        value,
+        dict,
+    ):
 
         return {
-            str(key): normalize_result(val)
-            for key, val in value.items()
+            str(k): normalize_for_json(v)
+            for k, v in value.items()
         }
 
-    # List
-    if isinstance(value, list):
+    if isinstance(
+        value,
+        (list, tuple, set),
+    ):
 
         return [
-            normalize_result(item)
-            for item in value
+            normalize_for_json(v)
+            for v in value
         ]
 
-    # Tuple
-    if isinstance(value, tuple):
-
-        return [
-            normalize_result(item)
-            for item in value
-        ]
-
-    # Set
-    if isinstance(value, set):
-
-        return [
-            normalize_result(item)
-            for item in value
-        ]
-
-    # Primitive
     if isinstance(
         value,
         (
@@ -318,27 +226,15 @@ def normalize_result(value: Any) -> Any:
 
         return value
 
-    # Fallback
-    try:
-
-        json.dumps(value)
-
-        return value
-
-    except Exception:
-
-        return str(value)
+    return str(value)
 
 
 def show_json(
-    data: Any,
+    value: Any,
 ):
-    """
-    Display data safely.
-    """
 
-    normalized = normalize_result(
-        data
+    normalized = normalize_for_json(
+        value
     )
 
     try:
@@ -360,63 +256,13 @@ def show_json(
         )
 
 
-def result_size(value: Any) -> int:
-    """
-    Estimate number of records contained in a result.
-    """
+# ============================================================
+# VERSION INFORMATION
+# ============================================================
 
-    if value is None:
-        return 0
-
-    if isinstance(
-        value,
-        (
-            list,
-            tuple,
-            set,
-        ),
-    ):
-
-        return len(value)
-
-    if isinstance(value, dict):
-
-        candidate_keys = [
-            "items",
-            "claims",
-            "limitations",
-            "findings",
-            "results",
-            "evidence",
-            "documents",
-            "issues",
-            "nodes",
-            "edges",
-            "queries",
-        ]
-
-        for key in candidate_keys:
-
-            candidate = value.get(key)
-
-            if isinstance(
-                candidate,
-                (
-                    list,
-                    tuple,
-                    set,
-                ),
-            ):
-
-                return len(candidate)
-
-    return 1
-
-
-def module_version(module: Any) -> Dict[str, Any]:
-    """
-    Extract version constants from a module.
-    """
+def get_module_versions(
+    module: Any,
+) -> Dict[str, Any]:
 
     versions = {}
 
@@ -454,40 +300,6 @@ def module_version(module: Any) -> Dict[str, Any]:
     return versions
 
 
-def public_callables(module: Any) -> List[str]:
-    """
-    Return public callable names from a module.
-    """
-
-    names = []
-
-    try:
-
-        for name in dir(module):
-
-            if name.startswith("_"):
-                continue
-
-            try:
-
-                obj = getattr(
-                    module,
-                    name,
-                )
-
-                if callable(obj):
-
-                    names.append(name)
-
-            except Exception:
-                continue
-
-    except Exception:
-        pass
-
-    return sorted(names)
-
-
 # ============================================================
 # MODULE HEALTH
 # ============================================================
@@ -506,9 +318,17 @@ failed_modules = [
     if not result["ok"]
 ]
 
-loaded_count = len(loaded_modules)
-failed_count = len(failed_modules)
-total_count = len(MODULES)
+loaded_count = len(
+    loaded_modules
+)
+
+failed_count = len(
+    failed_modules
+)
+
+total_count = len(
+    MODULES
+)
 
 
 # ============================================================
@@ -516,7 +336,9 @@ total_count = len(MODULES)
 # ============================================================
 
 st.markdown(
-    '<div class="main-title">⚖️ Indian Patent Analyzer</div>',
+    '<div class="main-title">'
+    "⚖️ Indian Patent Analyzer"
+    "</div>",
     unsafe_allow_html=True,
 )
 
@@ -536,7 +358,9 @@ st.markdown(
 
 with st.sidebar:
 
-    st.header("Navigation")
+    st.header(
+        "Navigation"
+    )
 
     page = st.radio(
         "Select page",
@@ -551,35 +375,36 @@ with st.sidebar:
 
     st.divider()
 
-    st.subheader("System")
-
-    st.write(
-        f"**Version:** {APP_VERSION}"
+    st.subheader(
+        "System"
     )
 
     st.write(
-        f"**Modules:** "
+        f"**Application:** V{APP_VERSION}"
+    )
+
+    st.write(
+        f"**Backend modules:** "
         f"{loaded_count}/{total_count}"
     )
 
     if failed_count == 0:
 
         st.success(
-            "System Ready"
+            "All modules loaded"
         )
 
     else:
 
         st.warning(
-            f"{failed_count} module(s) need attention"
+            f"{failed_count} module(s) failed"
         )
 
     st.divider()
 
     st.caption(
-        "Automated patent analysis is a "
-        "research and screening aid and "
-        "is not a legal opinion."
+        "Automated outputs are screening and "
+        "research aids, not legal opinions."
     )
 
 
@@ -593,43 +418,43 @@ if page == "🏠 Dashboard":
         "System Health"
     )
 
-    col1, col2, col3, col4 = st.columns(4)
+    c1, c2, c3, c4 = st.columns(4)
 
-    with col1:
+    with c1:
 
         st.metric(
             "Modules Loaded",
             f"{loaded_count}/{total_count}",
         )
 
-    with col2:
+    with c2:
 
         st.metric(
             "Failed Modules",
             failed_count,
         )
 
-    with col3:
+    with c3:
 
         st.metric(
-            "Application",
+            "Version",
             APP_VERSION,
         )
 
-    with col4:
+    with c4:
 
         st.metric(
             "Mode",
-            "TEST",
+            "Integration Test",
         )
 
     st.divider()
 
     st.subheader(
-        "Backend Status"
+        "Backend Modules"
     )
 
-    columns = st.columns(3)
+    cols = st.columns(3)
 
     for index, module_name in enumerate(
         MODULES
@@ -639,7 +464,9 @@ if page == "🏠 Dashboard":
             module_name
         ]
 
-        with columns[index % 3]:
+        with cols[
+            index % 3
+        ]:
 
             if result["ok"]:
 
@@ -659,81 +486,79 @@ if page == "🏠 Dashboard":
 
     st.divider()
 
-    if failed_count == 0:
-
-        st.success(
-            "All registered V3 backend modules "
-            "loaded successfully."
-        )
-
-    else:
-
-        st.warning(
-            "Some modules failed to load. "
-            "Open 'Module Test' to inspect "
-            "the exact traceback."
-        )
-
-    st.divider()
-
     st.subheader(
-        "Current Architecture"
+        "Analysis Architecture"
     )
 
     st.markdown(
         """
         <div class="pipeline-box">
 
-        **Patent PDF**
+        📄 **Patent PDF**
 
         ↓
 
-        **Document Parser**
+        🔎 **Document Parser**
 
         ↓
 
-        **Claims + Limitations**
+        📑 **Claims + Limitations**
 
         ↓
 
-        **Rule Engine**
+        ⚖️ **Rule Engine**
 
         ↓
 
-        **Section 3 Screening**
+        § **Section 3 Screening**
 
         ↓
 
-        **Prior-Art Search Planning**
+        🔍 **Prior-Art Search Planning**
 
         ↓
 
-        **Evidence Retrieval / Verification**
+        🧾 **Evidence Retrieval + Verification**
 
         ↓
 
-        **Novelty + Inventive Step**
+        🧠 **Novelty + Inventive Step**
 
         ↓
 
-        **FER + Prosecution**
+        📬 **Prosecution Analysis**
 
         ↓
 
-        **Knowledge Graph**
+        🕸️ **Knowledge Graph**
 
         ↓
 
-        **Validation**
+        ✅ **Validation**
 
         ↓
 
-        **Report**
+        📊 **Report**
 
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+    if failed_count:
+
+        st.warning(
+            "Some backend modules currently have "
+            "integration issues. The adapter allows "
+            "the working portions of the system to "
+            "continue operating."
+        )
+
+    else:
+
+        st.success(
+            "All registered backend modules imported successfully."
+        )
 
 
 # ============================================================
@@ -743,121 +568,104 @@ if page == "🏠 Dashboard":
 elif page == "📄 Patent Analysis":
 
     st.subheader(
-        "Patent Document Analysis"
+        "Patent Analysis"
     )
 
     st.write(
-        "Upload a patent PDF to test the current "
-        "V3 analysis stack."
+        "Upload a patent document and run the "
+        "integration adapter."
     )
 
     uploaded_file = st.file_uploader(
-        "Upload Patent PDF",
-        type=["pdf"],
+        "Upload patent document",
+        type=[
+            "pdf",
+            "docx",
+        ],
         accept_multiple_files=False,
     )
 
     if uploaded_file is None:
 
         st.info(
-            "Upload a PDF to begin testing."
+            "Upload a PDF or DOCX file to begin."
         )
 
         st.markdown(
             """
-            ### Test pipeline
+            ### Current test pipeline
 
-            1. PDF parsing
-            2. Claim extraction
-            3. Limitation analysis
+            1. Document extraction
+            2. Claim normalization
+            3. Claim analysis
             4. Rule screening
             5. Section 3 screening
             6. Prior-art planning
-            7. Novelty screening
-            8. Inventive-step screening
-            9. Prosecution analysis
-            10. Knowledge graph
-            11. Validation
+            7. Evidence status
+            8. Novelty interface
+            9. Inventive-step interface
+            10. Prosecution interface
+            11. Knowledge graph interface
+            12. Validation
             """
         )
 
     else:
 
-        file_bytes = uploaded_file.getvalue()
+        file_bytes = (
+            uploaded_file.getvalue()
+        )
 
         st.success(
             f"Loaded `{uploaded_file.name}` "
-            f"— {len(file_bytes):,} bytes"
+            f"({len(file_bytes):,} bytes)"
         )
 
         if st.button(
-            "🚀 Run V3 Integration Test",
+            "🚀 Run Integration Test",
             type="primary",
             use_container_width=True,
         ):
 
-            results = {}
-
-            progress = st.progress(
-                0
-            )
-
-            status = st.empty()
-
-            # ----------------------------------------------------
-            # STAGE 1
-            # ----------------------------------------------------
-
-            status.info(
-                "Stage 1/10 — Parsing patent document..."
-            )
-
-            parser_result = module_results.get(
+            adapter_result = module_results.get(
                 "document_parser"
             )
 
-            if not parser_result["ok"]:
+            if not adapter_result:
 
                 st.error(
-                    "Document parser cannot be imported."
-                )
-
-                st.code(
-                    parser_result["traceback"]
+                    "Document parser module is missing."
                 )
 
                 st.stop()
 
-            try:
+            integration_result = module_results.get(
+                "claim_analyzer"
+            )
 
-                parser = parser_result["module"]
+            if not integration_result:
 
-                parsed = call_first_available(
-                    parser,
-                    [
-                        "parse_document",
-                        "parse_pdf",
-                        "parse_file",
-                    ],
-                    file_bytes,
+                st.error(
+                    "Claim analyzer module is missing."
                 )
 
-                results[
-                    "document"
-                ] = parsed
+                st.stop()
 
-                st.success(
-                    "✅ Document parsing completed."
+            # ------------------------------------------------
+            # IMPORT ADAPTER
+            # ------------------------------------------------
+
+            try:
+
+                from services.integration_adapter import (
+                    PatentIntegrationAdapter,
                 )
 
             except Exception as exc:
 
-                results[
-                    "document_error"
-                ] = str(exc)
-
                 st.error(
-                    f"Document parsing failed: {exc}"
+                    "Could not import "
+                    "services.integration_adapter"
                 )
 
                 st.code(
@@ -866,654 +674,217 @@ elif page == "📄 Patent Analysis":
 
                 st.stop()
 
-            progress.progress(
-                10
+            # ------------------------------------------------
+            # RUN
+            # ------------------------------------------------
+
+            progress = st.progress(
+                0
             )
 
-            # ----------------------------------------------------
-            # STAGE 2
-            # ----------------------------------------------------
+            status = st.empty()
 
             status.info(
-                "Stage 2/10 — Analyzing claims..."
+                "Initializing integration adapter..."
             )
 
-            claim_result = module_results.get(
-                "claim_analyzer"
+            progress.progress(
+                5
             )
 
             try:
 
-                if claim_result["ok"]:
-
-                    claim_module = (
-                        claim_result["module"]
-                    )
-
-                    claims = call_first_available(
-                        claim_module,
-                        [
-                            "analyze_claims",
-                            "extract_claims",
-                            "parse_claims",
-                            "analyze_claim",
-                        ],
-                        parsed,
-                    )
-
-                    results[
-                        "claims"
-                    ] = claims
-
-                    st.success(
-                        "✅ Claim analysis completed."
-                    )
-
-                else:
-
-                    results[
-                        "claims_error"
-                    ] = claim_result["error"]
-
-                    st.warning(
-                        "Claim analyzer unavailable."
-                    )
-
-            except Exception as exc:
-
-                results[
-                    "claims_error"
-                ] = str(exc)
-
-                st.warning(
-                    f"Claim analysis warning: {exc}"
+                adapter = PatentIntegrationAdapter(
+                    modules=module_results
                 )
 
-            progress.progress(
-                20
-            )
-
-            # ----------------------------------------------------
-            # STAGE 3
-            # ----------------------------------------------------
-
-            status.info(
-                "Stage 3/10 — Running rule engine..."
-            )
-
-            rule_result = module_results.get(
-                "rule_engine"
-            )
-
-            try:
-
-                if rule_result["ok"]:
-
-                    rule_module = (
-                        rule_result["module"]
-                    )
-
-                    rules = call_first_available(
-                        rule_module,
-                        [
-                            "run_rule_engine",
-                            "check_claims",
-                            "evaluate_rules",
-                        ],
-                        parsed,
-                    )
-
-                    results[
-                        "rules"
-                    ] = rules
-
-                    st.success(
-                        "✅ Rule engine completed."
-                    )
-
-                else:
-
-                    results[
-                        "rules_error"
-                    ] = rule_result["error"]
-
-                    st.warning(
-                        "Rule engine unavailable."
-                    )
-
-            except Exception as exc:
-
-                results[
-                    "rules_error"
-                ] = str(exc)
-
-                st.warning(
-                    f"Rule engine warning: {exc}"
+                status.info(
+                    "Running normalized V3 pipeline..."
                 )
 
-            progress.progress(
-                30
-            )
+                progress.progress(
+                    10
+                )
 
-            # ----------------------------------------------------
-            # STAGE 4
-            # ----------------------------------------------------
+                result = adapter.analyze(
+                    file_bytes=file_bytes,
+                    filename=uploaded_file.name,
+                )
 
-            status.info(
-                "Stage 4/10 — Section 3 screening..."
-            )
+                progress.progress(
+                    100
+                )
 
-            section3_result = module_results.get(
-                "section3_analyzer"
-            )
+                status.success(
+                    "Integration pipeline finished."
+                )
 
-            try:
+                result_dict = result.to_dict()
 
-                if (
-                    section3_result
-                    and section3_result["ok"]
+                # Save complete result.
+                st.session_state[
+                    "integration_result"
+                ] = result_dict
+
+                st.session_state[
+                    "analysis_filename"
+                ] = uploaded_file.name
+
+                st.session_state[
+                    "analysis_bytes"
+                ] = file_bytes
+
+                # --------------------------------------------
+                # STATUS
+                # --------------------------------------------
+
+                if result.status == "completed":
+
+                    st.success(
+                        "🎉 Integration completed successfully."
+                    )
+
+                elif result.status == (
+                    "completed_with_warnings"
                 ):
 
-                    section3_module = (
-                        section3_result["module"]
-                    )
-
-                    section3 = call_first_available(
-                        section3_module,
-                        [
-                            "screen_document",
-                            "analyze_section_3",
-                            "screen_claim",
-                        ],
-                        parsed,
-                    )
-
-                    results[
-                        "section3"
-                    ] = section3
-
-                    st.success(
-                        "✅ Section 3 screening completed."
+                    st.warning(
+                        "⚠️ Integration completed with warnings."
                     )
 
                 else:
 
-                    results[
-                        "section3_error"
-                    ] = (
-                        section3_result["error"]
-                        if section3_result
-                        else "Module unavailable."
+                    st.warning(
+                        "⚠️ Integration completed partially."
                     )
 
-                    st.warning(
-                        "Section 3 analyzer unavailable."
+                # --------------------------------------------
+                # SUMMARY
+                # --------------------------------------------
+
+                warnings = result.warnings
+                errors = result.errors
+
+                c1, c2, c3 = st.columns(3)
+
+                with c1:
+
+                    st.metric(
+                        "Pipeline Status",
+                        result.status,
                     )
+
+                with c2:
+
+                    st.metric(
+                        "Warnings",
+                        len(warnings),
+                    )
+
+                with c3:
+
+                    st.metric(
+                        "Errors",
+                        len(errors),
+                    )
+
+                # --------------------------------------------
+                # STAGES
+                # --------------------------------------------
+
+                st.divider()
+
+                st.subheader(
+                    "Pipeline Stages"
+                )
+
+                stages = result.stages
+
+                for stage_name, stage in stages.items():
+
+                    stage_status = stage.get(
+                        "status",
+                        "unknown",
+                    )
+
+                    if stage_status == "completed":
+
+                        st.success(
+                            f"✅ {stage_name}"
+                        )
+
+                    elif stage_status == "warning":
+
+                        st.warning(
+                            f"⚠️ {stage_name}"
+                        )
+
+                    elif stage_status == "error":
+
+                        st.error(
+                            f"❌ {stage_name}"
+                        )
+
+                    else:
+
+                        st.info(
+                            f"ℹ️ {stage_name}"
+                        )
+
+                # --------------------------------------------
+                # WARNINGS
+                # --------------------------------------------
+
+                if warnings:
+
+                    st.divider()
+
+                    st.subheader(
+                        "Warnings"
+                    )
+
+                    for warning in warnings:
+
+                        st.warning(
+                            warning
+                        )
+
+                # --------------------------------------------
+                # ERRORS
+                # --------------------------------------------
+
+                if errors:
+
+                    st.divider()
+
+                    st.subheader(
+                        "Errors"
+                    )
+
+                    for error in errors:
+
+                        st.error(
+                            error
+                        )
+
+                st.info(
+                    "Open the **📊 Results** page for "
+                    "complete structured output."
+                )
 
             except Exception as exc:
 
-                results[
-                    "section3_error"
-                ] = str(exc)
-
-                st.warning(
-                    f"Section 3 warning: {exc}"
+                progress.progress(
+                    100
                 )
 
-            progress.progress(
-                40
-            )
-
-            # ----------------------------------------------------
-            # STAGE 5
-            # ----------------------------------------------------
-
-            status.info(
-                "Stage 5/10 — Building prior-art search plan..."
-            )
-
-            prior_result = module_results.get(
-                "prior_art"
-            )
-
-            try:
-
-                if prior_result["ok"]:
-
-                    prior_module = (
-                        prior_result["module"]
-                    )
-
-                    prior_art = call_first_available(
-                        prior_module,
-                        [
-                            "prepare_prior_art_analysis",
-                            "build_search_plan",
-                            "build_claim_search_queries",
-                            "generate_search_queries",
-                        ],
-                        (
-                            results.get(
-                                "claims"
-                            )
-                            or parsed
-                        ),
-                    )
-
-                    results[
-                        "prior_art"
-                    ] = prior_art
-
-                    st.success(
-                        "✅ Prior-art planning completed."
-                    )
-
-                else:
-
-                    results[
-                        "prior_art_error"
-                    ] = prior_result["error"]
-
-                    st.warning(
-                        "Prior-art module unavailable."
-                    )
-
-            except Exception as exc:
-
-                results[
-                    "prior_art_error"
-                ] = str(exc)
-
-                st.warning(
-                    f"Prior-art warning: {exc}"
+                st.error(
+                    "Integration pipeline failed."
                 )
 
-            progress.progress(
-                50
-            )
-
-            # ----------------------------------------------------
-            # STAGE 6
-            # ----------------------------------------------------
-
-            status.info(
-                "Stage 6/10 — Novelty screening..."
-            )
-
-            novelty_result = module_results.get(
-                "novelty_analyzer"
-            )
-
-            try:
-
-                if (
-                    novelty_result
-                    and novelty_result["ok"]
-                ):
-
-                    novelty_module = (
-                        novelty_result["module"]
-                    )
-
-                    novelty = call_first_available(
-                        novelty_module,
-                        [
-                            "analyze_novelty",
-                            "screen_novelty",
-                            "analyze_claim_novelty",
-                            "calculate_novelty_statistics",
-                        ],
-                        (
-                            results.get(
-                                "claims"
-                            )
-                            or parsed
-                        ),
-                    )
-
-                    results[
-                        "novelty"
-                    ] = novelty
-
-                    st.success(
-                        "✅ Novelty screening completed."
-                    )
-
-                else:
-
-                    results[
-                        "novelty_error"
-                    ] = (
-                        novelty_result["error"]
-                        if novelty_result
-                        else "Module unavailable."
-                    )
-
-                    st.warning(
-                        "Novelty analyzer unavailable."
-                    )
-
-            except Exception as exc:
-
-                results[
-                    "novelty_error"
-                ] = str(exc)
-
-                st.warning(
-                    f"Novelty warning: {exc}"
+                st.code(
+                    traceback.format_exc()
                 )
-
-            progress.progress(
-                60
-            )
-
-            # ----------------------------------------------------
-            # STAGE 7
-            # ----------------------------------------------------
-
-            status.info(
-                "Stage 7/10 — Inventive-step screening..."
-            )
-
-            inventive_result = module_results.get(
-                "inventive_step_analyzer"
-            )
-
-            try:
-
-                if (
-                    inventive_result
-                    and inventive_result["ok"]
-                ):
-
-                    inventive_module = (
-                        inventive_result["module"]
-                    )
-
-                    inventive_step = call_first_available(
-                        inventive_module,
-                        [
-                            "analyze_inventive_step",
-                            "screen_inventive_step",
-                            "analyze_claim_inventive_step",
-                            "analyze_claim",
-                        ],
-                        (
-                            results.get(
-                                "claims"
-                            )
-                            or parsed
-                        ),
-                    )
-
-                    results[
-                        "inventive_step"
-                    ] = inventive_step
-
-                    st.success(
-                        "✅ Inventive-step screening completed."
-                    )
-
-                else:
-
-                    results[
-                        "inventive_step_error"
-                    ] = (
-                        inventive_result["error"]
-                        if inventive_result
-                        else "Module unavailable."
-                    )
-
-                    st.warning(
-                        "Inventive-step analyzer unavailable."
-                    )
-
-            except Exception as exc:
-
-                results[
-                    "inventive_step_error"
-                ] = str(exc)
-
-                st.warning(
-                    f"Inventive-step warning: {exc}"
-                )
-
-            progress.progress(
-                70
-            )
-
-            # ----------------------------------------------------
-            # STAGE 8
-            # ----------------------------------------------------
-
-            status.info(
-                "Stage 8/10 — Prosecution analysis..."
-            )
-
-            prosecution_result = module_results.get(
-                "prosecution_analyzer"
-            )
-
-            try:
-
-                if (
-                    prosecution_result
-                    and prosecution_result["ok"]
-                ):
-
-                    prosecution_module = (
-                        prosecution_result["module"]
-                    )
-
-                    prosecution = call_first_available(
-                        prosecution_module,
-                        [
-                            "analyze_prosecution",
-                            "create_prosecution_dashboard",
-                            "analyze_prosecution_history",
-                        ],
-                        results,
-                    )
-
-                    results[
-                        "prosecution"
-                    ] = prosecution
-
-                    st.success(
-                        "✅ Prosecution analysis completed."
-                    )
-
-                else:
-
-                    results[
-                        "prosecution_error"
-                    ] = (
-                        prosecution_result["error"]
-                        if prosecution_result
-                        else "Module unavailable."
-                    )
-
-                    st.warning(
-                        "Prosecution analyzer unavailable."
-                    )
-
-            except Exception as exc:
-
-                results[
-                    "prosecution_error"
-                ] = str(exc)
-
-                st.warning(
-                    f"Prosecution warning: {exc}"
-                )
-
-            progress.progress(
-                80
-            )
-
-            # ----------------------------------------------------
-            # STAGE 9
-            # ----------------------------------------------------
-
-            status.info(
-                "Stage 9/10 — Building knowledge graph..."
-            )
-
-            graph_result = module_results.get(
-                "knowledge_graph"
-            )
-
-            try:
-
-                if (
-                    graph_result
-                    and graph_result["ok"]
-                ):
-
-                    graph_module = (
-                        graph_result["module"]
-                    )
-
-                    graph = call_first_available(
-                        graph_module,
-                        [
-                            "create_knowledge_graph",
-                            "build_knowledge_graph",
-                            "create_graph",
-                        ],
-                        results,
-                    )
-
-                    results[
-                        "knowledge_graph"
-                    ] = graph
-
-                    st.success(
-                        "✅ Knowledge graph completed."
-                    )
-
-                else:
-
-                    results[
-                        "knowledge_graph_error"
-                    ] = (
-                        graph_result["error"]
-                        if graph_result
-                        else "Module unavailable."
-                    )
-
-                    st.warning(
-                        "Knowledge graph module unavailable."
-                    )
-
-            except Exception as exc:
-
-                results[
-                    "knowledge_graph_error"
-                ] = str(exc)
-
-                st.warning(
-                    f"Knowledge graph warning: {exc}"
-                )
-
-            progress.progress(
-                90
-            )
-
-            # ----------------------------------------------------
-            # STAGE 10
-            # ----------------------------------------------------
-
-            status.info(
-                "Stage 10/10 — Validation..."
-            )
-
-            validation_result = module_results.get(
-                "validation"
-            )
-
-            try:
-
-                if (
-                    validation_result
-                    and validation_result["ok"]
-                ):
-
-                    validation_module = (
-                        validation_result["module"]
-                    )
-
-                    validation = call_first_available(
-                        validation_module,
-                        [
-                            "validate_analysis",
-                            "validate_pipeline",
-                            "quick_validate",
-                            "validate",
-                        ],
-                        results,
-                    )
-
-                    results[
-                        "validation"
-                    ] = validation
-
-                    st.success(
-                        "✅ Validation completed."
-                    )
-
-                else:
-
-                    results[
-                        "validation_error"
-                    ] = (
-                        validation_result["error"]
-                        if validation_result
-                        else "Module unavailable."
-                    )
-
-                    st.warning(
-                        "Validation module unavailable."
-                    )
-
-            except Exception as exc:
-
-                results[
-                    "validation_error"
-                ] = str(exc)
-
-                st.warning(
-                    f"Validation warning: {exc}"
-                )
-
-            progress.progress(
-                100
-            )
-
-            # ----------------------------------------------------
-            # SAVE SESSION RESULTS
-            # ----------------------------------------------------
-
-            st.session_state[
-                "analysis_results"
-            ] = results
-
-            st.session_state[
-                "analysis_filename"
-            ] = uploaded_file.name
-
-            st.session_state[
-                "analysis_bytes"
-            ] = file_bytes
-
-            status.success(
-                "🎉 V3 integration test completed."
-            )
-
-            st.success(
-                "Open the **📊 Results** page "
-                "to inspect the output."
-            )
 
 
 # ============================================================
@@ -1523,16 +894,12 @@ elif page == "📄 Patent Analysis":
 elif page == "🧪 Module Test":
 
     st.subheader(
-        "V3 Backend Module Test"
+        "Backend Module Test"
     )
 
     st.write(
-        "This page verifies that the current backend "
-        "modules can be imported independently."
-    )
-
-    st.info(
-        f"Loaded {loaded_count} of {total_count} modules."
+        "This page checks imports independently. "
+        "It does not execute the analysis pipeline."
     )
 
     st.divider()
@@ -1550,40 +917,69 @@ elif page == "🧪 Module Test":
                 expanded=False,
             ):
 
-                module = result["module"]
+                module = result[
+                    "module"
+                ]
 
-                st.write(
-                    f"**Import:** Successful"
-                )
-
-                versions = module_version(
+                versions = get_module_versions(
                     module
                 )
 
                 if versions:
 
                     st.write(
-                        "**Version information:**"
+                        "**Version:**"
                     )
 
                     st.json(
                         versions
                     )
 
-                functions = public_callables(
-                    module
-                )
+                public_functions = []
+
+                try:
+
+                    for name in dir(module):
+
+                        if name.startswith(
+                            "_"
+                        ):
+
+                            continue
+
+                        try:
+
+                            obj = getattr(
+                                module,
+                                name,
+                            )
+
+                            if callable(
+                                obj
+                            ):
+
+                                public_functions.append(
+                                    name
+                                )
+
+                        except Exception:
+                            continue
+
+                except Exception:
+                    pass
 
                 st.write(
                     f"**Public callables:** "
-                    f"{len(functions)}"
+                    f"{len(public_functions)}"
                 )
 
-                if functions:
+                if public_functions:
 
                     st.code(
                         "\n".join(
-                            functions
+                            sorted(
+                                public_functions
+                            )
                         )
                     )
 
@@ -1608,32 +1004,32 @@ elif page == "🧪 Module Test":
 
 
 # ============================================================
-# RESULTS PAGE
+# RESULTS
 # ============================================================
 
 elif page == "📊 Results":
 
     st.subheader(
-        "Analysis Results"
+        "Integration Results"
     )
 
-    results = st.session_state.get(
-        "analysis_results"
+    result = st.session_state.get(
+        "integration_result"
     )
 
     filename = st.session_state.get(
         "analysis_filename"
     )
 
-    if not results:
+    if not result:
 
         st.info(
-            "No analysis has been run yet."
+            "No integration result is available."
         )
 
         st.write(
-            "Go to **📄 Patent Analysis**, "
-            "upload a patent PDF and run the test."
+            "Go to **📄 Patent Analysis** and "
+            "run the integration test."
         )
 
     else:
@@ -1644,128 +1040,200 @@ elif page == "📊 Results":
                 f"Document: `{filename}`"
             )
 
-        # --------------------------------------------------------
-        # RESULT COUNTERS
-        # --------------------------------------------------------
+        # ----------------------------------------------------
+        # SUMMARY
+        # ----------------------------------------------------
 
-        successful = 0
-        errors = 0
+        document = result.get(
+            "document",
+            {},
+        )
 
-        for key, value in results.items():
+        stages = result.get(
+            "stages",
+            {},
+        )
 
-            if key.endswith(
-                "_error"
-            ):
+        warnings = result.get(
+            "warnings",
+            [],
+        )
 
-                errors += 1
+        errors = result.get(
+            "errors",
+            [],
+        )
 
-            elif value is not None:
-
-                successful += 1
-
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
 
         with c1:
 
             st.metric(
-                "Successful Results",
-                successful,
+                "Status",
+                result.get(
+                    "status",
+                    "unknown",
+                ),
             )
 
         with c2:
 
             st.metric(
-                "Warnings / Errors",
-                errors,
+                "Stages",
+                len(stages),
             )
 
         with c3:
 
             st.metric(
-                "Total Result Sections",
-                len(results),
+                "Warnings",
+                len(warnings),
+            )
+
+        with c4:
+
+            st.metric(
+                "Errors",
+                len(errors),
             )
 
         st.divider()
 
-        # --------------------------------------------------------
-        # RESULT TABS
-        # --------------------------------------------------------
+        # ----------------------------------------------------
+        # DOCUMENT
+        # ----------------------------------------------------
 
-        result_keys = list(
-            results.keys()
+        st.subheader(
+            "Document"
         )
 
-        tabs = st.tabs(
-            [
-                key.replace(
+        show_json(
+            document
+        )
+
+        # ----------------------------------------------------
+        # PIPELINE
+        # ----------------------------------------------------
+
+        st.subheader(
+            "Pipeline"
+        )
+
+        for stage_name, stage in stages.items():
+
+            with st.expander(
+                stage_name.replace(
                     "_",
                     " ",
-                ).title()
-                for key in result_keys
-            ]
-        )
+                ).title(),
+                expanded=False,
+            ):
 
-        for tab, key in zip(
-            tabs,
-            result_keys,
-        ):
+                st.write(
+                    f"**Status:** "
+                    f"{stage.get('status')}"
+                )
 
-            with tab:
+                if stage.get(
+                    "function"
+                ):
 
-                value = results[
-                    key
-                ]
+                    st.write(
+                        f"**Function:** "
+                        f"`{stage['function']}`"
+                    )
 
-                if key.endswith(
-                    "_error"
+                if stage.get(
+                    "signature"
+                ):
+
+                    st.code(
+                        stage["signature"]
+                    )
+
+                if stage.get(
+                    "warning"
+                ):
+
+                    st.warning(
+                        stage["warning"]
+                    )
+
+                if stage.get(
+                    "error"
                 ):
 
                     st.error(
-                        str(value)
+                        stage["error"]
                     )
 
-                elif value is None:
+                if stage.get(
+                    "result"
+                ) is not None:
 
-                    st.info(
-                        "No result returned."
-                    )
-
-                else:
-
-                    st.caption(
-                        f"Type: "
-                        f"`{type(value).__name__}`"
-                    )
-
-                    st.caption(
-                        f"Estimated records: "
-                        f"{result_size(value)}"
+                    st.write(
+                        "**Result:**"
                     )
 
                     show_json(
-                        value
+                        stage["result"]
                     )
+
+        # ----------------------------------------------------
+        # WARNINGS
+        # ----------------------------------------------------
+
+        if warnings:
+
+            st.divider()
+
+            st.subheader(
+                "Warnings"
+            )
+
+            for warning in warnings:
+
+                st.warning(
+                    warning
+                )
+
+        # ----------------------------------------------------
+        # ERRORS
+        # ----------------------------------------------------
+
+        if errors:
+
+            st.divider()
+
+            st.subheader(
+                "Errors"
+            )
+
+            for error in errors:
+
+                st.error(
+                    error
+                )
+
+        # ----------------------------------------------------
+        # DOWNLOAD
+        # ----------------------------------------------------
 
         st.divider()
 
-        # --------------------------------------------------------
-        # DOWNLOAD JSON
-        # --------------------------------------------------------
-
         json_data = json.dumps(
-            normalize_result(
-                results
+            normalize_for_json(
+                result
             ),
             indent=2,
             default=str,
         )
 
         st.download_button(
-            label="⬇️ Download Analysis JSON",
+            "⬇️ Download Integration JSON",
             data=json_data,
             file_name=(
-                "patent_analysis_results.json"
+                "patent_integration_result.json"
             ),
             mime="application/json",
             use_container_width=True,
@@ -1779,73 +1247,48 @@ elif page == "📊 Results":
 elif page == "ℹ️ About":
 
     st.subheader(
-        "About the Test Build"
+        "Indian Patent Analyzer V3"
     )
 
     st.markdown(
         """
-        ## Indian Patent Analyzer
+        ### Current objective
 
-        This build is intentionally focused on **testing the backend
-        architecture before adding more production functionality**.
+        This build is testing the **integration layer** before
+        further expansion of the application.
 
-        ### Design philosophy
+        The architecture deliberately separates:
 
-        The system separates:
+        **Document**
 
-        **Facts**
+        → **Structured Data**
 
-        ↓
+        → **Deterministic Analysis**
 
-        **Evidence**
+        → **Evidence**
 
-        ↓
+        → **AI Interpretation**
 
-        **Rules**
+        → **Human Review**
 
-        ↓
+        ### Important
 
-        **Analysis**
+        Individual backend modules may have different interfaces.
+        `integration_adapter.py` provides the common interface
+        between those modules and the Streamlit application.
 
-        ↓
+        This prevents the UI from becoming tightly coupled to
+        individual backend implementations.
 
-        **AI Explanation**
+        ### Current development priority
 
-        The AI layer should not become the authoritative source for
-        legal facts or evidence.
+        The immediate goal is:
 
-        ### Current backend
+        **Make the existing modules work together correctly.**
 
-        The current architecture includes:
-
-        - Document parsing
-        - Claim analysis
-        - Limitation extraction
-        - Rule engine
-        - Prior-art search planning
-        - Evidence processing
-        - Section 3 screening
-        - Novelty screening
-        - Inventive-step screening
-        - Amendment analysis
-        - FER analysis
-        - Prosecution analysis
-        - Knowledge graph
-        - Provenance
-        - Validation
-        - Report generation
-
-        ### Next step
-
-        The next development stage should be based on the actual
-        integration-test results rather than adding more modules
-        blindly.
+        Only after that should we add persistence, advanced search,
+        report generation, or additional AI features.
         """
-    )
-
-    st.info(
-        "Automated results are screening/research outputs "
-        "and should be reviewed by a qualified patent professional."
     )
 
 
@@ -1857,6 +1300,6 @@ st.divider()
 
 st.caption(
     f"Indian Patent Analyzer V{APP_VERSION} • "
-    f"Integration Test Build • "
-    f"{utc_now()}"
+    f"Integration Test • "
+    f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
 )
