@@ -1,320 +1,1261 @@
+"""
+Indian Patent Analyzer
+V3 Integration Test Dashboard
+
+Purpose:
+- Test the current V3 backend modules before adding more functionality.
+- Upload a patent PDF.
+- Run deterministic analysis.
+- Display parser, claims, rules, Section 3, prior-art planning,
+  novelty, inventive-step, prosecution, graph, scoring and validation.
+- Clearly report failures instead of crashing the application.
+
+Run:
+    streamlit run app.py
+"""
+
+from __future__ import annotations
+
+import io
 import json
-import hashlib
+import traceback
 from datetime import datetime, timezone
+from typing import Any, Dict, List
 
 import streamlit as st
 
-from services.analyzer import analyze_document
-from services.document_parser import extract_text_from_file, get_document_statistics
-from services.form2_rewriter import rewrite_form2, revised_form2_to_text, get_rewrite_summary
-from services.report_generator import generate_markdown_report, generate_text_report
-from services.evidence_engine import claim_support_map, detect_risk_signals, document_fingerprint
-from services.prior_art import build_queries, links
-from services.scoring import score_analysis
 
-APP_VERSION = "3.0.0"
+# ---------------------------------------------------------------------
+# PAGE CONFIG
+# ---------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="Indian Patent Intelligence Studio",
+    page_title="Indian Patent Analyzer",
     page_icon="⚖️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
+
+# ---------------------------------------------------------------------
+# CONSTANTS
+# ---------------------------------------------------------------------
+
+APP_VERSION = "3.0.0"
+
+MODULES = [
+    "document_parser",
+    "claim_analyzer",
+    "rule_engine",
+    "prior_art",
+    "evidence_engine",
+    "scoring",
+    "section3_analyzer",
+    "novelty_analyzer",
+    "inventive_step_analyzer",
+    "amendment_analyzer",
+    "prosecution_analyzer",
+    "knowledge_graph",
+    "provenance",
+    "validation",
+    "report_generator",
+]
+
+
+# ---------------------------------------------------------------------
+# STYLING
+# ---------------------------------------------------------------------
+
 st.markdown(
     """
     <style>
-    .block-container {max-width: 1500px; padding-top: 1.2rem; padding-bottom: 3rem;}
-    .hero {padding: 1.6rem 1.8rem; border-radius: 20px; background: linear-gradient(135deg,#0f172a,#1e293b); color: white; margin-bottom: 1rem; border: 1px solid #334155;}
-    .hero h1 {margin:0; font-size:2.25rem; letter-spacing:-.03em;}
-    .hero p {margin:.45rem 0 0; opacity:.82; font-size:1rem;}
-    .small {font-size:.82rem; opacity:.75;}
-    .section-card {padding:1rem; border:1px solid #e5e7eb; border-radius:14px; margin:.5rem 0;}
+    .main-title {
+        font-size: 2.3rem;
+        font-weight: 700;
+        margin-bottom: 0.2rem;
+    }
+
+    .subtitle {
+        color: #6b7280;
+        font-size: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .status-card {
+        padding: 1rem;
+        border-radius: 12px;
+        border: 1px solid #e5e7eb;
+        margin-bottom: 0.7rem;
+    }
+
+    .success {
+        border-left: 5px solid #16a34a;
+    }
+
+    .warning {
+        border-left: 5px solid #f59e0b;
+    }
+
+    .error {
+        border-left: 5px solid #dc2626;
+    }
+
+    .info {
+        border-left: 5px solid #2563eb;
+    }
+
+    .metric-label {
+        font-size: 0.8rem;
+        color: #6b7280;
+    }
+
+    .metric-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+    }
+
+    .small-muted {
+        color: #6b7280;
+        font-size: 0.8rem;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-DEFAULTS = {
-    "analysis_result": None,
-    "uploaded_text": "",
-    "uploaded_filename": "",
-    "uploaded_bytes": None,
-    "rewrite_result": None,
-    "analysis_id": None,
-}
-for key, value in DEFAULTS.items():
-    st.session_state.setdefault(key, value)
+
+# ---------------------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------------------
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def safe_import(module_name: str):
+    """
+    Import a module without crashing the whole application.
+    """
+    try:
+        module = __import__(module_name, fromlist=["*"])
+        return {
+            "ok": True,
+            "module": module,
+            "error": None,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "module": None,
+            "error": f"{type(exc).__name__}: {exc}",
+            "traceback": traceback.format_exc(),
+        }
+
+
+def call_first_available(module: Any, names: List[str], *args, **kwargs):
+    """
+    Call the first available function from a list.
+
+    This is intentionally defensive because the V3 modules have
+    backward-compatible function names.
+    """
+    for name in names:
+        fn = getattr(module, name, None)
+
+        if callable(fn):
+            return fn(*args, **kwargs)
+
+    raise AttributeError(
+        f"No compatible function found. Tried: {', '.join(names)}"
+    )
+
+
+def normalize_result(value: Any) -> Any:
+    """
+    Convert dataclasses / objects into JSON-friendly structures.
+    """
+    if value is None:
+        return None
+
+    if hasattr(value, "to_dict") and callable(value.to_dict):
+        try:
+            return value.to_dict()
+        except Exception:
+            pass
+
+    if hasattr(value, "__dataclass_fields__"):
+        try:
+            from dataclasses import asdict
+
+            return asdict(value)
+        except Exception:
+            pass
+
+    if isinstance(value, dict):
+        return {
+            str(k): normalize_result(v)
+            for k, v in value.items()
+        }
+
+    if isinstance(value, list):
+        return [normalize_result(v) for v in value]
+
+    if isinstance(value, tuple):
+        return [normalize_result(v) for v in value]
+
+    if isinstance(value, set):
+        return [normalize_result(v) for v in value]
+
+    if isinstance(value, (str, int, float, bool)):
+        return value
+
+    try:
+        json.dumps(value)
+        return value
+    except Exception:
+        return str(value)
+
+
+def count_items(value: Any) -> int:
+    """
+    Estimate the number of records in a result.
+    """
+    if value is None:
+        return 0
+
+    if isinstance(value, (list, tuple, set)):
+        return len(value)
+
+    if isinstance(value, dict):
+        for key in (
+            "items",
+            "claims",
+            "findings",
+            "results",
+            "evidence",
+            "documents",
+            "limitations",
+            "issues",
+            "nodes",
+            "edges",
+        ):
+            if key in value and isinstance(value[key], (list, tuple, set)):
+                return len(value[key])
+
+    return 1
+
+
+def show_json(data: Any, height: int = 500):
+    """
+    Safe JSON viewer.
+    """
+    normalized = normalize_result(data)
+
+    try:
+        st.json(normalized, expanded=False)
+    except Exception:
+        st.code(
+            json.dumps(
+                normalized,
+                indent=2,
+                default=str,
+            ),
+            language="json",
+        )
+
+
+def status_badge(ok: bool, label: str):
+    if ok:
+        st.success(f"✅ {label}")
+    else:
+        st.error(f"❌ {label}")
+
+
+# ---------------------------------------------------------------------
+# MODULE HEALTH CHECK
+# ---------------------------------------------------------------------
+
+@st.cache_data(show_spinner=False)
+def check_modules():
+    results = {}
+
+    for module_name in MODULES:
+        results[module_name] = safe_import(
+            f"services.{module_name}"
+        )
+
+    return results
+
+
+# ---------------------------------------------------------------------
+# HEADER
+# ---------------------------------------------------------------------
 
 st.markdown(
-    '<div class="hero"><h1>⚖️ Indian Patent Intelligence Studio</h1>'
-    '<p>Evidence-first claim analysis • Indian patent-rule screening • support mapping • prior-art discovery • amendment review</p></div>',
+    '<div class="main-title">⚖️ Indian Patent Analyzer</div>',
     unsafe_allow_html=True,
 )
 
-with st.sidebar:
-    st.header("Analysis Controls")
-    document_type = st.selectbox(
-        "Document type",
-        [
-            "Form 2 Complete Specification",
-            "Form 2 Provisional Specification",
-            "Claims",
-            "Abstract",
-            "FER Response",
-            "Other",
-        ],
-    )
-    analysis_level = st.selectbox("Analysis depth", ["Basic", "Detailed", "Comprehensive"], index=2)
-    st.divider()
-    st.caption(f"Application version: {APP_VERSION}")
-    st.caption("Analysis ID, document fingerprint and evidence are retained in the current session.")
-    st.info(
-        "Decision-support software only. It does not determine patentability, validity, infringement, or grant/rejection."
-    )
-    st.warning(
-        "Verify the current Patents Act, Rules, notifications, manuals and case law before relying on any legal analysis."
-    )
-
-uploaded = st.file_uploader(
-    "Upload patent document",
-    type=["pdf", "docx"],
-    help="PDF or DOCX. For scanned PDFs, OCR is recommended before analysis.",
+st.markdown(
+    f"""
+    <div class="subtitle">
+        V{APP_VERSION} — Deterministic Patent Intelligence & Prosecution Analysis
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
-if uploaded:
-    raw = uploaded.getvalue()
-    if (
-        st.session_state.uploaded_filename != uploaded.name
-        or st.session_state.uploaded_bytes != raw
-    ):
-        try:
-            extracted = extract_text_from_file(raw, uploaded.name)
-            st.session_state.update(
-                uploaded_bytes=raw,
-                uploaded_text=extracted,
-                uploaded_filename=uploaded.name,
-                analysis_result=None,
-                rewrite_result=None,
-                analysis_id=None,
-            )
-        except Exception as exc:
-            st.error(f"Document extraction failed: {exc}")
 
-if st.session_state.uploaded_text:
-    stats = get_document_statistics(st.session_state.uploaded_text)
-    fingerprint = hashlib.sha256(st.session_state.uploaded_bytes or b"").hexdigest()
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Document", st.session_state.uploaded_filename[:28])
-    c2.metric("Size", f"{len(st.session_state.uploaded_bytes)/1024:.1f} KB")
-    c3.metric("Words", f"{len(st.session_state.uploaded_text.split()):,}")
-    c4.metric("SHA-256", fingerprint[:12] + "…")
-    with st.expander("Extracted text preview"):
-        st.text(st.session_state.uploaded_text[:12000])
+# ---------------------------------------------------------------------
+# SIDEBAR
+# ---------------------------------------------------------------------
 
-col_a, col_b = st.columns([2, 1])
-with col_a:
-    analyze = st.button("🔍 Run Full Patent Analysis", type="primary", use_container_width=True)
-with col_b:
-    rewrite = st.button(
-        "✍️ Propose Form 2 Revision",
-        use_container_width=True,
-        disabled=not bool(st.session_state.uploaded_text),
+with st.sidebar:
+    st.header("System")
+
+    st.caption(
+        f"Application Version: {APP_VERSION}"
     )
 
-if analyze:
-    if not st.session_state.uploaded_bytes:
-        st.warning("Upload a document first.")
-    else:
-        with st.status("Running evidence-first analysis…", expanded=True) as status:
-            try:
-                result = analyze_document(
-                    st.session_state.uploaded_bytes,
-                    st.session_state.uploaded_filename,
-                    document_type,
-                    analysis_level,
-                )
-                rule = result.get("rule_engine", {})
-                claim_engine = result.get("claim_engine", {})
-                claims = claim_engine.get("claims", [])
-
-                result["support_map"] = claim_support_map(claims, st.session_state.uploaded_text)
-                result["risk_signals"] = detect_risk_signals(st.session_state.uploaded_text, claims)
-                result["quality_score"] = score_analysis(
-                    rule, claim_engine, result.get("gemini_analysis", {})
-                )
-                result["fingerprint"] = document_fingerprint(st.session_state.uploaded_text)
-                result["prior_art_queries"] = build_queries(
-                    rule.get("title", ""), rule.get("abstract", ""), claims
-                )
-
-                analysis_id = "IPA-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + "-" + fingerprint[:8]
-                result["provenance"] = {
-                    "analysis_id": analysis_id,
-                    "application_version": APP_VERSION,
-                    "analysis_timestamp_utc": datetime.now(timezone.utc).isoformat(),
-                    "document_sha256": fingerprint,
-                    "document_type": document_type,
-                    "analysis_level": analysis_level,
-                }
-
-                st.session_state.analysis_result = result
-                st.session_state.analysis_id = analysis_id
-                status.update(label="Analysis complete", state="complete")
-            except Exception as exc:
-                status.update(label="Analysis failed", state="error")
-                st.exception(exc)
-
-if rewrite:
-    with st.spinner("Generating proposed revision and screening for potential new matter…"):
-        try:
-            context = json.dumps(st.session_state.analysis_result, ensure_ascii=False)[:60000] if st.session_state.analysis_result else ""
-            st.session_state.rewrite_result = rewrite_form2(
-                st.session_state.uploaded_text, context, document_type, analysis_level
-            )
-        except Exception as exc:
-            st.error(f"Rewrite failed: {exc}")
-
-analysis = st.session_state.analysis_result
-if analysis:
-    gemini = analysis.get("gemini_analysis", {})
-    quality = analysis.get("quality_score", {})
-    claims = analysis.get("claim_engine", {}).get("claims", [])
-    support = analysis.get("support_map", [])
-    support_by_claim = {item.get("claim_number"): item for item in support}
+    st.caption(
+        f"Test Time: {utc_now()}"
+    )
 
     st.divider()
-    tabs = st.tabs([
-        "Overview",
-        "Claims & Support",
-        "Legal Issues",
-        "Prior Art",
-        "Evidence",
-        "Provenance",
-        "Report",
-    ])
 
-    with tabs[0]:
-        assessment = gemini.get("document_assessment", {})
-        summary = assessment.get("overall_summary", assessment.get("summary", "")) if isinstance(assessment, dict) else assessment
-        st.subheader("Executive assessment")
-        st.write(summary or "No executive summary was returned.")
-        metrics = st.columns(5)
-        values = [
-            ("Readiness", quality.get("overall_readiness", "—")),
-            ("Structure", quality.get("form_structure", "—")),
-            ("Claims", quality.get("claim_structure", "—")),
-            ("Completeness", quality.get("document_completeness", "—")),
-            ("Review signals", len(analysis.get("risk_signals", []))),
-        ]
-        for col, (label, value) in zip(metrics, values):
-            col.metric(label, value)
-        st.caption(quality.get("methodology", ""))
+    page = st.radio(
+        "Navigate",
+        [
+            "🏠 Dashboard",
+            "📄 Patent Analysis",
+            "🧪 Module Test",
+            "📊 Results",
+            "ℹ️ About",
+        ],
+    )
 
-    with tabs[1]:
-        st.subheader(f"Claim intelligence · {len(claims)} claims")
-        if not claims:
-            st.warning("No claims were reliably parsed from the uploaded document.")
-        for claim in claims:
-            number = claim.get("claim_number", "?")
-            with st.expander(f"Claim {number} · {claim.get('claim_type', 'Unknown')} · {claim.get('claim_category', '')}"):
-                st.write(claim.get("claim_text", claim.get("text", "")))
-                mapped = support_by_claim.get(number, {}).get("elements", [])
-                if mapped:
-                    st.markdown("**Limitation-to-disclosure support**")
-                    for item in mapped:
-                        status = item.get("status", "UNKNOWN")
-                        icon = {"CLEAR_SUPPORT": "🟢", "POSSIBLE_SUPPORT": "🟡", "NO_CLEAR_SUPPORT": "🔴"}.get(status, "⚪")
-                        st.markdown(f"{icon} **{status}** — {item.get('element', '')}")
-                        for evidence in item.get("evidence", [])[:3]:
-                            st.caption(f"Evidence: {evidence.get('text', '')}")
-                checks = []
-                if claim.get("antecedent_basis_issues"):
-                    checks.append(("Antecedent basis", claim["antecedent_basis_issues"]))
-                if claim.get("dependency_issues"):
-                    checks.append(("Dependency", claim["dependency_issues"]))
-                for label, issues in checks:
-                    st.warning(f"{label}: {issues}")
+    st.divider()
 
-    with tabs[2]:
-        st.subheader("Issues requiring human review")
-        issues = (
-            analysis.get("rule_engine", {}).get("issues", [])
-            + analysis.get("risk_signals", [])
-            + (gemini.get("issues", []) if isinstance(gemini, dict) else [])
+    st.caption(
+        "This application provides automated screening and "
+        "analysis support. It does not constitute legal advice."
+    )
+
+
+# ---------------------------------------------------------------------
+# MODULE STATUS
+# ---------------------------------------------------------------------
+
+module_results = check_modules()
+
+loaded_count = sum(
+    1 for result in module_results.values()
+    if result["ok"]
+)
+
+total_count = len(module_results)
+
+
+# ---------------------------------------------------------------------
+# DASHBOARD
+# ---------------------------------------------------------------------
+
+if page == "🏠 Dashboard":
+
+    st.subheader("System Health")
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    with c1:
+        st.metric(
+            "Modules",
+            f"{loaded_count}/{total_count}",
         )
-        if not issues:
-            st.success("No issues were surfaced by the available checks.")
-        for index, issue in enumerate(issues, 1):
-            if isinstance(issue, dict):
-                severity = issue.get("severity", issue.get("category", "REVIEW"))
-                title = issue.get("finding", issue.get("message", issue.get("title", f"Issue {index}")))
-                with st.expander(f"{severity} · {title}"):
-                    st.json(issue)
+
+    with c2:
+        st.metric(
+            "Status",
+            "READY" if loaded_count == total_count else "PARTIAL",
+        )
+
+    with c3:
+        st.metric(
+            "Version",
+            APP_VERSION,
+        )
+
+    with c4:
+        st.metric(
+            "Mode",
+            "Deterministic",
+        )
+
+    st.divider()
+
+    st.subheader("Backend Modules")
+
+    cols = st.columns(3)
+
+    for index, module_name in enumerate(MODULES):
+        result = module_results[module_name]
+
+        with cols[index % 3]:
+            if result["ok"]:
+                st.success(
+                    f"✅ `{module_name}`"
+                )
             else:
-                st.write(issue)
+                st.error(
+                    f"❌ `{module_name}`"
+                )
+                st.caption(result["error"])
 
-    with tabs[3]:
-        st.subheader("Prior-art discovery workspace")
-        st.caption("Search links are discovery aids. They are not a novelty or inventive-step conclusion.")
-        for query in analysis.get("prior_art_queries", []):
-            st.markdown(f"**Query:** `{query}`")
-            for name, url in links(query).items():
-                st.markdown(f"- [{name}]({url})")
-
-    with tabs[4]:
-        st.subheader("Traceable evidence")
-        manual = analysis.get("manual", {})
-        st.write("Manual retrieval status:", manual.get("retrieval_status", "Unknown"))
-        for evidence in manual.get("evidence", [])[:15]:
-            st.markdown(
-                f"**Pages {evidence.get('page_start')}-{evidence.get('page_end')}** · score {evidence.get('match_score')}"
-            )
-            st.caption(evidence.get("text", "")[:1400])
-        st.subheader("Deterministic risk signals")
-        st.json(analysis.get("risk_signals", []))
-
-    with tabs[5]:
-        st.subheader("Analysis provenance")
-        st.json(analysis.get("provenance", {}))
-        st.caption("Use the analysis ID and document SHA-256 when comparing or reproducing a review.")
-
-    with tabs[6]:
-        name = analysis.get("document_name", "patent")
-        markdown = generate_markdown_report(analysis, name)
-        text_report = generate_text_report(analysis, name)
-        base = name.rsplit(".", 1)[0]
-        st.download_button("Download Markdown report", markdown, file_name=f"{base}_analysis.md")
-        st.download_button("Download Text report", text_report, file_name=f"{base}_analysis.txt")
-        st.download_button(
-            "Download JSON evidence",
-            json.dumps(analysis, indent=2, ensure_ascii=False),
-            file_name=f"{base}_analysis.json",
-            mime="application/json",
-        )
-        st.markdown(markdown[:20000])
-
-if st.session_state.rewrite_result:
-    result = st.session_state.rewrite_result
     st.divider()
-    st.header("Proposed Form 2 Revision")
-    summary = get_rewrite_summary(result)
-    cols = st.columns(4)
-    cols[0].metric("Status", summary["rewrite_status"])
-    cols[1].metric("Changed claims", summary["changed_claims"])
-    cols[2].metric("New-matter flags", summary["flag_count"])
-    cols[3].metric("Human review", "REQUIRED" if summary["human_review_required"] else "NOT FLAGGED")
-    st.warning("AI-proposed drafting only. Compare every amendment with the originally filed disclosure and current law before use.")
-    new_matter = result.get("new_matter_check", {})
-    st.subheader("Section 59 screening")
-    st.info(new_matter.get("overall_status", "UNKNOWN"))
-    st.json(new_matter.get("flags", []))
-    st.subheader("Proposed text")
-    revised = revised_form2_to_text(result)
-    st.text_area("Revised Form 2", revised, height=600)
-    st.download_button("Download proposed Form 2", revised, file_name="proposed_revised_form2.txt")
+
+    if loaded_count == total_count:
+        st.success(
+            "All registered V3 modules imported successfully."
+        )
+    else:
+        st.warning(
+            f"{total_count - loaded_count} module(s) could not be imported. "
+            "Use the Module Test page to inspect the exact errors."
+        )
+
+
+# ---------------------------------------------------------------------
+# PATENT ANALYSIS
+# ---------------------------------------------------------------------
+
+elif page == "📄 Patent Analysis":
+
+    st.subheader("Patent Document Analysis")
+
+    st.write(
+        "Upload a patent PDF to test the current V3 analysis stack."
+    )
+
+    uploaded_file = st.file_uploader(
+        "Upload Patent PDF",
+        type=["pdf"],
+        accept_multiple_files=False,
+    )
+
+    if uploaded_file is None:
+        st.info(
+            "Upload a PDF to begin."
+        )
+
+        st.markdown(
+            """
+            ### Analysis pipeline
+
+            **PDF**
+            → Document Parser
+            → Claims
+            → Limitations
+            → Rule Engine
+            → Section 3
+            → Prior Art Plan
+            → Evidence
+            → Novelty
+            → Inventive Step
+            → Prosecution
+            → Knowledge Graph
+            → Validation
+            """
+        )
+
+    else:
+
+        file_bytes = uploaded_file.getvalue()
+
+        st.success(
+            f"Loaded `{uploaded_file.name}` "
+            f"({len(file_bytes):,} bytes)"
+        )
+
+        if st.button(
+            "🚀 Run Patent Analysis",
+            type="primary",
+            use_container_width=True,
+        ):
+
+            results = {}
+
+            progress = st.progress(0)
+            status = st.empty()
+
+            # ---------------------------------------------------------
+            # 1. DOCUMENT PARSER
+            # ---------------------------------------------------------
+
+            status.info("1/10 — Parsing document...")
+
+            parser_result = module_results.get(
+                "document_parser"
+            )
+
+            if not parser_result["ok"]:
+                st.error(
+                    parser_result["error"]
+                )
+                st.stop()
+
+            parser = parser_result["module"]
+
+            try:
+
+                parsed = call_first_available(
+                    parser,
+                    [
+                        "parse_document",
+                        "parse_pdf",
+                        "parse_file",
+                    ],
+                    file_bytes,
+                )
+
+                results["document"] = parsed
+
+                st.success("✅ Document parsed")
+
+            except Exception as exc:
+
+                st.error(
+                    f"Document parsing failed: {exc}"
+                )
+
+                st.code(
+                    traceback.format_exc()
+                )
+
+                st.stop()
+
+            progress.progress(10)
+
+            # ---------------------------------------------------------
+            # 2. CLAIM ANALYSIS
+            # ---------------------------------------------------------
+
+            status.info("2/10 — Analyzing claims...")
+
+            claim_module = module_results.get(
+                "claim_analyzer"
+            )
+
+            try:
+
+                claims = None
+
+                if claim_module["ok"]:
+
+                    module = claim_module["module"]
+
+                    claims = call_first_available(
+                        module,
+                        [
+                            "analyze_claims",
+                            "extract_claims",
+                            "analyze_claim",
+                        ],
+                        parsed,
+                    )
+
+                results["claims"] = claims
+
+                st.success("✅ Claim analysis completed")
+
+            except Exception as exc:
+
+                results["claims_error"] = str(exc)
+
+                st.warning(
+                    f"Claim analysis warning: {exc}"
+                )
+
+            progress.progress(20)
+
+            # ---------------------------------------------------------
+            # 3. RULE ENGINE
+            # ---------------------------------------------------------
+
+            status.info("3/10 — Running patent rules...")
+
+            rule_module = module_results.get(
+                "rule_engine"
+            )
+
+            try:
+
+                rules = None
+
+                if rule_module["ok"]:
+
+                    module = rule_module["module"]
+
+                    rules = call_first_available(
+                        module,
+                        [
+                            "run_rule_engine",
+                            "check_claims",
+                            "evaluate_rules",
+                        ],
+                        parsed,
+                    )
+
+                results["rules"] = rules
+
+                st.success("✅ Rule engine completed")
+
+            except Exception as exc:
+
+                results["rules_error"] = str(exc)
+
+                st.warning(
+                    f"Rule engine warning: {exc}"
+                )
+
+            progress.progress(30)
+
+            # ---------------------------------------------------------
+            # 4. SECTION 3
+            # ---------------------------------------------------------
+
+            status.info("4/10 — Screening Section 3...")
+
+            section3_module = module_results.get(
+                "section3_analyzer"
+            )
+
+            try:
+
+                section3 = None
+
+                if section3_module and section3_module["ok"]:
+
+                    module = section3_module["module"]
+
+                    section3 = call_first_available(
+                        module,
+                        [
+                            "screen_document",
+                            "analyze_section_3",
+                        ],
+                        parsed,
+                    )
+
+                results["section3"] = section3
+
+                st.success(
+                    "✅ Section 3 screening completed"
+                )
+
+            except Exception as exc:
+
+                results["section3_error"] = str(exc)
+
+                st.warning(
+                    f"Section 3 warning: {exc}"
+                )
+
+            progress.progress(40)
+
+            # ---------------------------------------------------------
+            # 5. PRIOR ART
+            # ---------------------------------------------------------
+
+            status.info("5/10 — Building prior-art search plan...")
+
+            prior_art_module = module_results.get(
+                "prior_art"
+            )
+
+            try:
+
+                prior_art = None
+
+                if prior_art_module["ok"]:
+
+                    module = prior_art_module["module"]
+
+                    prior_art = call_first_available(
+                        module,
+                        [
+                            "prepare_prior_art_analysis",
+                            "build_search_plan",
+                            "generate_search_queries",
+                        ],
+                        claims if claims is not None else parsed,
+                    )
+
+                results["prior_art"] = prior_art
+
+                st.success(
+                    "✅ Prior-art planning completed"
+                )
+
+            except Exception as exc:
+
+                results["prior_art_error"] = str(exc)
+
+                st.warning(
+                    f"Prior-art warning: {exc}"
+                )
+
+            progress.progress(50)
+
+            # ---------------------------------------------------------
+            # 6. NOVELTY
+            # ---------------------------------------------------------
+
+            status.info("6/10 — Running novelty screening...")
+
+            novelty_module = module_results.get(
+                "novelty_analyzer"
+            )
+
+            try:
+
+                novelty = None
+
+                if novelty_module and novelty_module["ok"]:
+
+                    module = novelty_module["module"]
+
+                    novelty = call_first_available(
+                        module,
+                        [
+                            "analyze_novelty",
+                            "screen_novelty",
+                            "calculate_novelty_statistics",
+                        ],
+                        claims if claims is not None else parsed,
+                    )
+
+                results["novelty"] = novelty
+
+                st.success(
+                    "✅ Novelty screening completed"
+                )
+
+            except Exception as exc:
+
+                results["novelty_error"] = str(exc)
+
+                st.warning(
+                    f"Novelty warning: {exc}"
+                )
+
+            progress.progress(60)
+
+            # ---------------------------------------------------------
+            # 7. INVENTIVE STEP
+            # ---------------------------------------------------------
+
+            status.info(
+                "7/10 — Running inventive-step screening..."
+            )
+
+            inventive_module = module_results.get(
+                "inventive_step_analyzer"
+            )
+
+            try:
+
+                inventive_step = None
+
+                if inventive_module and inventive_module["ok"]:
+
+                    module = inventive_module["module"]
+
+                    inventive_step = call_first_available(
+                        module,
+                        [
+                            "analyze_inventive_step",
+                            "screen_inventive_step",
+                            "analyze_claim_inventive_step",
+                        ],
+                        claims if claims is not None else parsed,
+                    )
+
+                results["inventive_step"] = inventive_step
+
+                st.success(
+                    "✅ Inventive-step screening completed"
+                )
+
+            except Exception as exc:
+
+                results["inventive_step_error"] = str(exc)
+
+                st.warning(
+                    f"Inventive-step warning: {exc}"
+                )
+
+            progress.progress(70)
+
+            # ---------------------------------------------------------
+            # 8. PROSECUTION
+            # ---------------------------------------------------------
+
+            status.info(
+                "8/10 — Building prosecution analysis..."
+            )
+
+            prosecution_module = module_results.get(
+                "prosecution_analyzer"
+            )
+
+            try:
+
+                prosecution = None
+
+                if prosecution_module and prosecution_module["ok"]:
+
+                    module = prosecution_module["module"]
+
+                    prosecution = call_first_available(
+                        module,
+                        [
+                            "analyze_prosecution",
+                            "create_prosecution_dashboard",
+                            "analyze_prosecution_history",
+                        ],
+                        results,
+                    )
+
+                results["prosecution"] = prosecution
+
+                st.success(
+                    "✅ Prosecution analysis completed"
+                )
+
+            except Exception as exc:
+
+                results["prosecution_error"] = str(exc)
+
+                st.warning(
+                    f"Prosecution warning: {exc}"
+                )
+
+            progress.progress(80)
+
+            # ---------------------------------------------------------
+            # 9. KNOWLEDGE GRAPH
+            # ---------------------------------------------------------
+
+            status.info(
+                "9/10 — Building knowledge graph..."
+            )
+
+            graph_module = module_results.get(
+                "knowledge_graph"
+            )
+
+            try:
+
+                graph = None
+
+                if graph_module and graph_module["ok"]:
+
+                    module = graph_module["module"]
+
+                    graph = call_first_available(
+                        module,
+                        [
+                            "create_knowledge_graph",
+                            "build_knowledge_graph",
+                            "create_graph",
+                        ],
+                        results,
+                    )
+
+                results["knowledge_graph"] = graph
+
+                st.success(
+                    "✅ Knowledge graph generated"
+                )
+
+            except Exception as exc:
+
+                results["knowledge_graph_error"] = str(exc)
+
+                st.warning(
+                    f"Knowledge graph warning: {exc}"
+                )
+
+            progress.progress(90)
+
+            # ---------------------------------------------------------
+            # 10. VALIDATION
+            # ---------------------------------------------------------
+
+            status.info(
+                "10/10 — Validating analysis..."
+            )
+
+            validation_module = module_results.get(
+                "validation"
+            )
+
+            try:
+
+                validation = None
+
+                if validation_module and validation_module["ok"]:
+
+                    module = validation_module["module"]
+
+                    validation = call_first_available(
+                        module,
+                        [
+                            "validate_analysis",
+                            "validate_pipeline",
+                            "quick_validate",
+                        ],
+                        results,
+                    )
+
+                results["validation"] = validation
+
+                st.success(
+                    "✅ Validation completed"
+                )
+
+            except Exception as exc:
+
+                results["validation_error"] = str(exc)
+
+                st.warning(
+                    f"Validation warning: {exc}"
+                )
+
+            progress.progress(100)
+
+            status.success(
+                "Analysis pipeline finished."
+            )
+
+            st.session_state["analysis_results"] = results
+            st.session_state["analysis_filename"] = uploaded_file.name
+            st.session_state["analysis_bytes"] = file_bytes
+
+            st.balloons()
+
+            st.success(
+                "🎉 Test run completed. Open the Results page."
+            )
+
+
+# ---------------------------------------------------------------------
+# MODULE TEST
+# ---------------------------------------------------------------------
+
+elif page == "🧪 Module Test":
+
+    st.subheader("V3 Backend Module Test")
+
+    st.write(
+        "This page checks whether every registered backend module "
+        "can be imported successfully."
+    )
+
+    for module_name in MODULES:
+
+        result = module_results[module_name]
+
+        if result["ok"]:
+
+            with st.expander(
+                f"✅ {module_name}",
+                expanded=False,
+            ):
+
+                module = result["module"]
+
+                st.write(
+                    f"Module: `services.{module_name}`"
+                )
+
+                version_candidates = [
+                    key
+                    for key in dir(module)
+                    if "VERSION" in key.upper()
+                ]
+
+                if version_candidates:
+
+                    st.write("Detected version constants:")
+
+                    versions = {}
+
+                    for key in version_candidates:
+
+                        try:
+                            versions[key] = getattr(
+                                module,
+                                key,
+                            )
+                        except Exception:
+                            pass
+
+                    st.json(versions)
+
+                public_functions = [
+                    name
+                    for name in dir(module)
+                    if not name.startswith("_")
+                    and callable(getattr(module, name, None))
+                ]
+
+                st.write(
+                    f"Public callable objects: "
+                    f"**{len(public_functions)}**"
+                )
+
+                st.code(
+                    "\n".join(
+                        public_functions[:100]
+                    )
+                )
+
+        else:
+
+            with st.expander(
+                f"❌ {module_name}",
+                expanded=True,
+            ):
+
+                st.error(
+                    result["error"]
+                )
+
+                if "traceback" in result:
+                    st.code(
+                        result["traceback"]
+                    )
+
+
+# ---------------------------------------------------------------------
+# RESULTS
+# ---------------------------------------------------------------------
+
+elif page == "📊 Results":
+
+    st.subheader("Analysis Results")
+
+    results = st.session_state.get(
+        "analysis_results"
+    )
+
+    filename = st.session_state.get(
+        "analysis_filename"
+    )
+
+    if not results:
+
+        st.info(
+            "No analysis has been run yet. "
+            "Go to Patent Analysis and upload a PDF."
+        )
+
+    else:
+
+        if filename:
+            st.caption(
+                f"Document: `{filename}`"
+            )
+
+        # -------------------------------------------------------------
+        # SUMMARY METRICS
+        # -------------------------------------------------------------
+
+        successful = 0
+        failed = 0
+
+        for key, value in results.items():
+
+            if key.endswith("_error"):
+
+                failed += 1
+
+            elif value is not None:
+
+                successful += 1
+
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            st.metric(
+                "Completed Stages",
+                successful,
+            )
+
+        with c2:
+            st.metric(
+                "Warnings / Errors",
+                failed,
+            )
+
+        with c3:
+            st.metric(
+                "Result Sections",
+                len(results),
+            )
+
+        st.divider()
+
+        # -------------------------------------------------------------
+        # TABS
+        # -------------------------------------------------------------
+
+        tab_names = list(results.keys())
+
+        tabs = st.tabs(
+            [
+                name.replace("_", " ").title()
+                for name in tab_names
+            ]
+        )
+
+        for tab, key in zip(tabs, tab_names):
+
+            with tab:
+
+                value = results[key]
+
+                if key.endswith("_error"):
+
+                    st.error(
+                        str(value)
+                    )
+
+                else:
+
+                    if value is None:
+
+                        st.info(
+                            "No result returned."
+                        )
+
+                    else:
+
+                        st.write(
+                            f"Result type: `{type(value).__name__}`"
+                        )
+
+                        show_json(
+                            value
+                        )
+
+        st.divider()
+
+        # -------------------------------------------------------------
+        # DOWNLOAD JSON
+        # -------------------------------------------------------------
+
+        json_data = json.dumps(
+            normalize_result(results),
+            indent=2,
+            default=str,
+        )
+
+        st.download_button(
+            "⬇️ Download Analysis JSON",
+            data=json_data,
+            file_name="patent_analysis_results.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+
+
+# ---------------------------------------------------------------------
+# ABOUT
+# ---------------------------------------------------------------------
+
+elif page == "ℹ️ About":
+
+    st.subheader("About Indian Patent Analyzer")
+
+    st.markdown(
+        """
+        ### Architecture
+
+        The application is designed around a provenance-first,
+        evidence-based patent analysis architecture.
+
+        ```text
+        Patent PDF
+             │
+             ▼
+        Document Parser
+             │
+             ▼
+        Claims + Limitations
+             │
+             ├──────────────► Rule Engine
+             │
+             ├──────────────► Section 3 Screening
+             │
+             ├──────────────► Prior-Art Search Plan
+             │
+             ├──────────────► Evidence Retrieval
+             │
+             ▼
+        Evidence Verification
+             │
+             ├──────────────► Novelty
+             │
+             ├──────────────► Inventive Step
+             │
+             ├──────────────► Amendments
+             │
+             └──────────────► Prosecution
+             │
+             ▼
+        Knowledge Graph
+             │
+             ▼
+        Validation
+             │
+             ▼
+        Report
+        ```
+
+        ### Design principle
+
+        The system separates:
+
+        **Facts → Evidence → Rules → Analysis → AI explanation**
+
+        Gemini/LLM output should not be treated as the authoritative
+        source of patent-law facts.
+
+        ### Current status
+
+        This build is intended primarily for **integration testing**.
+
+        Once the complete pipeline passes with real patent PDFs,
+        we can move to the persistent document store, production API,
+        authentication, advanced search, and final frontend.
+        """
+    )
+
+    st.info(
+        "Automated analysis is a screening and research aid, "
+        "not a legal opinion."
+    )
+
+
+# ---------------------------------------------------------------------
+# FOOTER
+# ---------------------------------------------------------------------
 
 st.divider()
+
 st.caption(
-    "Indian Patent Intelligence Studio · AI-assisted review · Not legal advice · Verify current IP India sources before use."
+    f"Indian Patent Analyzer V{APP_VERSION} • "
+    "Integration Test Build • "
+    "Generated {utc_now()}"
 )
