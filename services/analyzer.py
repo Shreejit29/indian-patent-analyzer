@@ -1,5 +1,8 @@
+import hashlib
 import json
 import re
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -37,6 +40,66 @@ MANUAL_FILE = (
     / "manuals"
     / "patent_office_manual_2019_v3.pdf"
 )
+
+
+# ============================================================
+# ANALYSIS PROVENANCE / QUALITY HELPERS
+# ============================================================
+
+ANALYZER_VERSION = "3.0.0"
+
+
+def sha256_bytes(data: bytes) -> str:
+    """Return a stable SHA-256 fingerprint for the source document."""
+    return hashlib.sha256(data or b"").hexdigest()
+
+
+def build_analysis_id() -> str:
+    """Create a traceable identifier for one analysis run."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    return f"IPA-{stamp}-{uuid.uuid4().hex[:8].upper()}"
+
+
+def build_claim_quality_summary(claim_analysis: Dict[str, Any]) -> Dict[str, Any]:
+    """Create transparent claim metrics without making legal conclusions."""
+    claims = claim_analysis.get("claims", []) or []
+    if not isinstance(claims, list):
+        return {"claim_count": 0, "independent_claims": 0, "dependent_claims": 0, "issue_count": 0}
+    independent = 0
+    dependent = 0
+    issue_count = 0
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        text = str(claim.get("claim_text", claim.get("text", "")))
+        if re.search(r"\bclaim\s+\d+", text, re.I):
+            dependent += 1
+        else:
+            independent += 1
+        for key in ("issues", "warnings"):
+            value = claim.get(key, [])
+            if isinstance(value, list):
+                issue_count += len(value)
+    return {
+        "claim_count": len(claims),
+        "independent_claims": independent,
+        "dependent_claims": dependent,
+        "issue_count": issue_count,
+    }
+
+
+def build_quality_summary(rule_analysis: Dict[str, Any], claim_analysis: Dict[str, Any], manual_context: Dict[str, Any], text: str) -> Dict[str, Any]:
+    """Summarize what the pipeline actually verified, rather than inventing a score."""
+    issues = rule_analysis.get("issues", []) if isinstance(rule_analysis, dict) else []
+    return {
+        "document_text_available": bool(text and text.strip()),
+        "document_characters": len(text or ""),
+        "rule_issues_detected": len(issues) if isinstance(issues, list) else 0,
+        "claim_metrics": build_claim_quality_summary(claim_analysis),
+        "manual_retrieval": manual_context.get("status", "unknown"),
+        "deterministic_checks_completed": bool(rule_analysis),
+        "ai_analysis_completed": False,
+    }
 
 
 # ============================================================
@@ -961,7 +1024,20 @@ document being analyzed:
 """
 
     # ========================================================
-    # 10. GEMINI
+    # 10. ANALYSIS PROVENANCE
+    # ========================================================
+
+    analysis_id = build_analysis_id()
+    document_sha256 = sha256_bytes(file_bytes)
+    quality_summary = build_quality_summary(
+        rule_analysis=rule_analysis,
+        claim_analysis=claim_analysis,
+        manual_context=manual_context,
+        text=text,
+    )
+
+    # ========================================================
+    # 11. GEMINI
     # ========================================================
 
     gemini_analysis = (
@@ -974,10 +1050,24 @@ document being analyzed:
     )
 
     # ========================================================
-    # 11. FINAL RESULT
+    # 12. FINAL RESULT
     # ========================================================
 
+    quality_summary["ai_analysis_completed"] = bool(gemini_analysis)
+
     return {
+        "analysis_id": analysis_id,
+
+        "analyzer_version": ANALYZER_VERSION,
+
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+
+        "document_fingerprint": {
+            "algorithm": "SHA-256",
+            "sha256": document_sha256,
+            "filename": filename,
+        },
+
         "document_name": filename,
 
         "document_type": document_type,
@@ -985,6 +1075,16 @@ document being analyzed:
         "analysis_level": analysis_level,
 
         "document_statistics": statistics,
+
+        "quality_summary": quality_summary,
+
+        "pipeline": [
+            "document_extraction",
+            "deterministic_rule_checks",
+            "claim_parsing_and_dependency_analysis",
+            "manual_evidence_retrieval",
+            "ai_reasoning",
+        ],
 
         # ----------------------------------------------------
         # Deterministic analysis
